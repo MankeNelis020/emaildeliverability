@@ -1,4 +1,3 @@
-export * from "./schema/index.js";
-export * from "./types/scan.js";
-export * from "./scoring/index.js";
-
+export * from "./schema/index";
+export * from "./types/scan";
+export * from "./scoring";
