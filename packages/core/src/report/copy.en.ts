@@ -172,10 +172,11 @@ export const ACTIONS: Record<ActionId, ActionCopy> = {
 };
 
 export function headlineFor(verdict: "low" | "medium" | "high", email: number, web: number): string {
-  if (verdict === "high") return "High campaign risk: fix authentication and landing page speed before sending.";
-  if (verdict === "medium") return "Moderate campaign risk: address the top issues before your next send.";
+  if (verdict === "high") return "High risk: fix authentication and landing-page performance before sending to avoid wasted spend.";
+  if (verdict === "medium") return "Moderate risk: address the top blockers before your next send.";
   return email >= 90 && web >= 90
-    ? "Low campaign risk: you’re in good shape for the next campaign."
-    : "Low campaign risk: minor optimizations can still improve results.";
+    ? "Low risk: you’re in good shape for the next campaign."
+    : "Low risk: a few optimizations can still lift results.";
 }
+
 

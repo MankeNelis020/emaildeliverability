@@ -179,4 +179,71 @@ export function computeScoresFromScan(scan: ScanResult) {
 
   return { email, web, risk, verdict };
 }
+export type BlockerId =
+  | "blacklisted"
+  | "dmarc_missing"
+  | "dmarc_policy_none"
+  | "auth_critical"
+  | "website_unstable"
+  | "mobile_lcp_gt_4s"
+  | "website_score_lt_50";
+
+export interface Blocker {
+  id: BlockerId;
+  message: string;
+}
+
+export function deriveBlockers(scan: ScanResult, emailScore: number, webScore: number): Blocker[] {
+  const blockers: Blocker[] = [];
+
+  const dmarc = (scan.email_scan as any)?.checks?.dmarc ?? {};
+  const dmarcPresent = dmarc.present === true;
+  const dmarcPolicy = (dmarc.policy ?? "unknown") as string;
+
+  const dkim = (scan.email_scan as any)?.checks?.dkim ?? {};
+  const dkimPresent = dkim.present === true;
+
+  const spf = (scan.email_scan as any)?.checks?.spf ?? {};
+  const spfPresent = spf.present === true;
+  const spfResult = (spf.result ?? "unknown") as string;
+
+  const listed = (scan.email_scan as any)?.checks?.blacklists?.listed === true;
+
+  const mobile = (scan.website_scan as any)?.aggregates?.mobile?.p95 ?? {};
+  const lcpMs = hasNumber(mobile.lcp_ms) ? mobile.lcp_ms : null;
+
+  const stability = ((scan.website_scan as any)?.aggregates?.stability ?? "unknown") as string;
+  const sendWindowEnabled = scan.inputs.send_window.enabled === true;
+
+  if (!dkimPresent) blockers.push({ id: "auth_critical", message: "DKIM signing is missing." });
+
+  if (spfPresent && (spfResult === "softfail" || spfResult === "neutral"))
+  blockers.push({ id: "auth_critical", message: "SPF is weak (softfail/neutral)." });
+   
+  if (!spfPresent) blockers.push({ id: "auth_critical", message: "SPF record is missing." });
+
+  if (listed) blockers.push({ id: "blacklisted", message: "Blacklist signal detected." });
+  if (!dmarcPresent) blockers.push({ id: "dmarc_missing", message: "DMARC is missing." });
+  if (dmarcPresent && dmarcPolicy === "none")
+    blockers.push({ id: "dmarc_policy_none", message: "DMARC policy is not enforced (policy=none)." });
+
+  if (sendWindowEnabled && stability === "unstable")
+    blockers.push({ id: "website_unstable", message: "Website is unstable during the planned send window." });
+
+  if (sendWindowEnabled && lcpMs != null && lcpMs > 4000)
+    blockers.push({ id: "mobile_lcp_gt_4s", message: "Mobile LCP exceeds 4 seconds during send window." });
+
+  if (webScore < 50) blockers.push({ id: "website_score_lt_50", message: "Website readiness score is below 50." });
+
+  // Cap list for readability
+  return blockers.slice(0, 6);
+}
+
+export function isReadyToSend(verdict: Verdict, blockers: Blocker[]): boolean {
+  // Conservative B2B stance:
+  // - If high verdict OR any blockers => not ready
+  if (verdict === "high") return false;
+  if (blockers.length > 0) return false;
+  return true;
+}
 
