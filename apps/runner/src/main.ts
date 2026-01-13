@@ -18,7 +18,7 @@ function writeJson(p: string, obj: unknown) {
 }
 
 function main() {
-  const inputPath = process.argv[2] ?? path.join(__dirname, "sample-input.json");
+  const inputPath = process.argv[2] ?? path.resolve(__dirname, "../src/sample-input.json");
   const outPath = process.argv[3] ?? path.join(process.cwd(), "out.scan-result.json");
 
   const scan = readJson<ScanResult>(inputPath);
