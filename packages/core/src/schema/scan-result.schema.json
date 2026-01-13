@@ -1,1 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://crs.local/schema/scan-result/1.0",
+  "title": "ScanResult",
+  "type": "object",
+  "required": ["schema_version", "scan_id", "created_at", "inputs", "scores", "email_scan", "website_scan", "meta"],
+  "properties": {
+    "schema_version": { "type": "string", "const": "1.0" },
+    "scan_id": { "type": "string", "minLength": 8 },
+    "created_at": { "type": "string" },
+
+    "tenant": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "brand_id": { "type": ["string", "null"] },
+        "owner_user_id": { "type": ["string", "null"] },
+        "white_label": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "brand_name": { "type": ["string", "null"] },
+            "logo_url": { "type": ["string", "null"] },
+            "primary_color": { "type": ["string", "null"] },
+            "report_domain": { "type": ["string", "null"] },
+            "cta_url": { "type": ["string", "null"] }
+          }
+        }
+      }
+    },
+
+    "inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["website_url", "sending_email", "send_window"],
+      "properties": {
+        "website_url": { "type": "string" },
+        "sending_email": { "type": "string" },
+        "send_window": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "timezone"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "timezone": { "type": "string" },
+            "scheduled_send_at": { "type": ["string", "null"] }
+          }
+        }
+      }
+    },
+
+    "scores": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["email_readiness", "website_readiness", "campaign_risk"],
+      "properties": {
+        "email_readiness": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["score", "max"],
+          "properties": { "score": { "type": "number" }, "max": { "type": "number", "const": 100 } }
+        },
+        "website_readiness": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["score", "max"],
+          "properties": { "score": { "type": "number" }, "max": { "type": "number", "const": 100 } }
+        },
+        "campaign_risk": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["level", "score", "max"],
+          "properties": {
+            "level": { "type": "string", "enum": ["low", "medium", "high"] },
+            "score": { "type": "number" },
+            "max": { "type": "number", "const": 100 }
+          }
+        }
+      }
+    },
+
+    "email_scan": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "website_scan": {
+      "type": "object",
+      "additionalProperties": true
+    },
+
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "key_insight": { "type": ["string", "null"] },
+        "top_priorities": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["finding_id", "priority"],
+            "properties": {
+              "finding_id": { "type": "string" },
+              "priority": { "type": "number" }
+            }
+          }
+        }
+      }
+    },
+
+    "meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_mode", "scanner_region", "runtime_ms"],
+      "properties": {
+        "run_mode": { "type": "string", "enum": ["single", "scheduled_window"] },
+        "scanner_region": { "type": "string" },
+        "runtime_ms": { "type": "number" }
+      }
+    }
+  }
+}
 
