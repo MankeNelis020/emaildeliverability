@@ -4,3 +4,9 @@ dist
 .DS_Store
 coverage
 *.log
+
+# runner outputs
+out.scan-result.json
+out.report.json
+apps/runner/out.scan-result.json
+apps/runner/out.report.json
