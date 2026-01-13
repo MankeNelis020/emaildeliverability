@@ -16,7 +16,13 @@ function readJson<T>(p: string): T {
 
 function writeJson(p: string, obj: unknown) {
   fs.writeFileSync(p, JSON.stringify(obj, null, 2), "utf-8");
+    const reportPath = path.join(process.cwd(), "out.report.json");
+  const report = generateReportV1(next);
+  writeJson(reportPath, report);
+  console.log(`Report: ${reportPath}`);
 }
+
+
 
 function main() {
   const inputPath = process.argv[2] ?? path.resolve(__dirname, "../src/sample-input.json");
