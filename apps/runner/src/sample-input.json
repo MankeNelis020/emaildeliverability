@@ -34,9 +34,5 @@
       "blockers": { "render_blocking_js": true, "consent_blocks_interaction": true, "excessive_third_parties": true }
     }
   },
-  "meta": {
-    "run_mode": "scheduled_window",
-    "scanner_region": "eu-west",
-    "runtime_ms": 0
-  }
+  "meta": { "run_mode": "scheduled_window", "scanner_region": "eu-west", "runtime_ms": 0 }
 }
