@@ -1,1 +1,12 @@
+<<<<<<< HEAD
 
+=======
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src"
+  },
+  "include": ["src"]
+}
+>>>>>>> d3802f5 (chore: add tsconfig and src stubs for workspace packages)

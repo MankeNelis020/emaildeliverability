@@ -1,0 +1,42 @@
+{
+  "schema_version": "1.0",
+  "scan_id": "scan_demo_001",
+  "created_at": "2026-01-13T18:30:00Z",
+  "inputs": {
+    "website_url": "https://example.com",
+    "sending_email": "news@example.com",
+    "send_window": {
+      "enabled": true,
+      "timezone": "Europe/Amsterdam",
+      "scheduled_send_at": "2026-01-14T09:00:00+01:00"
+    }
+  },
+  "scores": {
+    "email_readiness": { "score": 0, "max": 100 },
+    "website_readiness": { "score": 0, "max": 100 },
+    "campaign_risk": { "level": "high", "score": 0, "max": 100 }
+  },
+  "email_scan": {
+    "checks": {
+      "dmarc": { "present": true, "policy": "none", "pct": 100 },
+      "dkim": { "present": false },
+      "spf": { "present": true, "result": "softfail", "dns_lookup_count": 12 },
+      "blacklists": { "listed": false }
+    }
+  },
+  "website_scan": {
+    "aggregates": {
+      "mobile": { "p95": { "ttfb_ms": 1400, "lcp_ms": 4200, "cls": 0.18, "inp_ms": 350 } },
+      "desktop": { "p95": { "ttfb_ms": 600, "lcp_ms": 2500 } },
+      "stability": "unstable",
+      "cache": { "consistent_hit": false },
+      "redirects": { "count": 2 },
+      "blockers": { "render_blocking_js": true, "consent_blocks_interaction": true, "excessive_third_parties": true }
+    }
+  },
+  "meta": {
+    "run_mode": "scheduled_window",
+    "scanner_region": "eu-west",
+    "runtime_ms": 0
+  }
+}
