@@ -1,13 +1,13 @@
-import { generateReportV1 } from "@crs/core";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 import type { ScanResult } from "@crs/core";
-import { scoreEmailReadiness, scoreWebsiteReadiness, scoreCampaignRisk } from "@crs/core";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import {
+  scoreEmailReadiness,
+  scoreWebsiteReadiness,
+  scoreCampaignRisk,
+  generateReportV1
+} from "@crs/core";
 
 function readJson<T>(p: string): T {
   const raw = fs.readFileSync(p, "utf-8");
@@ -16,17 +16,20 @@ function readJson<T>(p: string): T {
 
 function writeJson(p: string, obj: unknown) {
   fs.writeFileSync(p, JSON.stringify(obj, null, 2), "utf-8");
-    const reportPath = path.join(process.cwd(), "out.report.json");
-  const report = generateReportV1(next);
-  writeJson(reportPath, report);
-  console.log(`Report: ${reportPath}`);
 }
 
-
-
 function main() {
-  const inputPath = process.argv[2] ?? path.resolve(__dirname, "../src/sample-input.json");
-  const outPath = process.argv[3] ?? path.join(process.cwd(), "out.scan-result.json");
+  // Always resolve outputs to repo root (1 level up from apps/runner)
+  const repoRoot = path.resolve(process.cwd(), "..", "..");
+
+  // Allow optional args, default to sample input in src/
+  const inputArg = process.argv[2];
+  const inputPath = inputArg
+    ? path.resolve(process.cwd(), inputArg)
+    : path.resolve(process.cwd(), "src", "sample-input.json");
+
+  const outScanPath = path.join(repoRoot, "out.scan-result.json");
+  const outReportPath = path.join(repoRoot, "out.report.json");
 
   const scan = readJson<ScanResult>(inputPath);
 
@@ -36,22 +39,13 @@ function main() {
     send_window: { enabled: scan.inputs.send_window.enabled }
   });
 
-  // For hard-stops around DMARC we pass the explicit DMARC info if present
   const dmarc = (scan.email_scan as any)?.checks?.dmarc ?? {};
   const dmarc_present = typeof dmarc.present === "boolean" ? dmarc.present : undefined;
   const dmarc_policy = typeof dmarc.policy === "string" ? dmarc.policy : undefined;
 
   const risk = scoreCampaignRisk({
-    email: {
-      score: email.score,
-      signals: email.signals,
-      dmarc_present,
-      dmarc_policy
-    },
-    web: {
-      score: web.score,
-      signals: web.signals
-    }
+    email: { score: email.score, signals: email.signals, dmarc_present, dmarc_policy },
+    web: { score: web.score, signals: web.signals }
   });
 
   const next: ScanResult = {
@@ -67,8 +61,16 @@ function main() {
     }
   };
 
-  writeJson(outPath, next);
-  console.log(`Wrote: ${outPath}`);
+  // Write scan result
+  writeJson(outScanPath, next);
+
+  // Write report (based on the scored scan)
+  const report = generateReportV1(next);
+  writeJson(outReportPath, report);
+
+  console.log(`Input:  ${inputPath}`);
+  console.log(`Wrote:  ${outScanPath}`);
+  console.log(`Report: ${outReportPath}`);
   console.log(`Email: ${email.score} (${email.status})`);
   console.log(`Web:   ${web.score} (${web.status})`);
   console.log(`Risk:  ${risk.level} (${risk.score})`);
