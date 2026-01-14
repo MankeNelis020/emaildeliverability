@@ -27,7 +27,7 @@ function formatReportMarkdown(report: any): string {
  
 
   if (hard.length) {
-    lines.push(`## Blocking issues (must be ixed before sending)`);
+    lines.push(`## Blocking issues (must be fixed before sending)`);
     hard.forEach((b: any) => lines.push(`- ${b.message}`));
     lines.push(``);
   }
