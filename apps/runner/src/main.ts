@@ -6,8 +6,54 @@ import {
   scoreEmailReadiness,
   scoreWebsiteReadiness,
   scoreCampaignRisk,
-  generateReportV1
+  generateReportV1,
+  formatReportMarkdownV1
 } from "@crs/core";
+
+function formatReportMarkdown(report: any): string {
+  const hard = (report.blockers ?? []).filter((b: any) => b.severity === "hard");
+  const soft = (report.blockers ?? []).filter((b: any) => b.severity === "soft");
+
+  const lines: string[] = [];
+  lines.push(`# Campaign Readiness Report`);
+  lines.push(``);
+  lines.push(`**Verdict:** ${String(report.verdict).toUpperCase()}`);
+  lines.push(`**Ready to send:** ${report.ready_to_send ? "No" : "Yes"}`);
+  lines.push(`**Confidence:** ${report.confidence}`);
+  lines.push(``);
+  lines.push(`## Summary`);
+  lines.push(`- ${report.headline}`);
+  lines.push(``);
+  lines.push(`## Scores`);
+  lines.push(`- Email readiness: ${report.scores.email.score}/100 (${report.scores.email.status})`);
+  lines.push(`- Website readiness: ${report.scores.website.score}/100 (${report.scores.website.status})`);
+  lines.push(`- Campaign risk: ${report.scores.campaign.level.toUpperCase()}`);
+  lines.push(``);
+
+  if (hard.length) {
+    lines.push(`## Blocking issues`);
+    hard.forEach((b: any) => lines.push(`- ${b.message}`));
+    lines.push(``);
+  }
+
+  if (soft.length) {
+    lines.push(`## Warnings`);
+    soft.forEach((b: any) => lines.push(`- ${b.message}`));
+    lines.push(``);
+  }
+
+  lines.push(`## Recommended actions`);
+  report.top_actions.forEach((a: any, i: number) => {
+    lines.push(`### ${i + 1}. ${a.title}`);
+    lines.push(`- Impact: ${a.impact} · Effort: ${a.effort}`);
+    lines.push(`- ${a.why}`);
+    a.steps.forEach((s: string) => lines.push(`  - ${s}`));
+    lines.push(``);
+  });
+
+  return lines.join("\n").trim() + "\n";
+}
+
 
 function readJson<T>(p: string): T {
   const raw = fs.readFileSync(p, "utf-8");
@@ -67,7 +113,14 @@ function main() {
   // Write report (based on the scored scan)
   const report = generateReportV1(next);
   writeJson(outReportPath, report);
+  const outMdPath = path.join(repoRoot, "out.report.md");
+  fs.writeFileSync(outMdPath, formatReportMarkdownV1 (report), "utf-8");
+  const mdPath = path.join(process.cwd(), "out.report.md");
+  fs.writeFileSync(mdPath, formatReportMarkdown(report), "utf-8");
+  console.log(`Markdown written: ${mdPath}`);
 
+
+  console.log(`Markdown: ${outMdPath}`);
   console.log(`Input:  ${inputPath}`);
   console.log(`Wrote:  ${outScanPath}`);
   console.log(`Report: ${outReportPath}`);
