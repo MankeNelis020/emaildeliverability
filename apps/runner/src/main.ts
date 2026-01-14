@@ -18,20 +18,16 @@ function formatReportMarkdown(report: any): string {
   lines.push(`# Campaign Readiness Report`);
   lines.push(``);
   lines.push(`**Verdict:** ${String(report.verdict).toUpperCase()}`);
-  lines.push(`**Ready to send:** ${report.ready_to_send ? "No" : "Yes"}`);
+  lines.push(`**Ready to send:** ${report.ready_to_send ? "Yes" : "No"}`);
   lines.push(`**Confidence:** ${report.confidence}`);
   lines.push(``);
   lines.push(`## Summary`);
   lines.push(`- ${report.headline}`);
   lines.push(``);
-  lines.push(`## Scores`);
-  lines.push(`- Email readiness: ${report.scores.email.score}/100 (${report.scores.email.status})`);
-  lines.push(`- Website readiness: ${report.scores.website.score}/100 (${report.scores.website.status})`);
-  lines.push(`- Campaign risk: ${report.scores.campaign.level.toUpperCase()}`);
-  lines.push(``);
+ 
 
   if (hard.length) {
-    lines.push(`## Blocking issues`);
+    lines.push(`## Blocking issues (must be ixed before sending)`);
     hard.forEach((b: any) => lines.push(`- ${b.message}`));
     lines.push(``);
   }
@@ -41,6 +37,12 @@ function formatReportMarkdown(report: any): string {
     soft.forEach((b: any) => lines.push(`- ${b.message}`));
     lines.push(``);
   }
+
+  lines.push(`## Scores`);
+  lines.push(`- Email readiness: ${report.scores.email.score}/100 (${report.scores.email.status})`);
+  lines.push(`- Website readiness: ${report.scores.website.score}/100 (${report.scores.website.status})`);
+  lines.push(`- Campaign risk: ${report.scores.campaign.level.toUpperCase()}`);
+  lines.push(``);
 
   lines.push(`## Recommended actions`);
   report.top_actions.forEach((a: any, i: number) => {
@@ -118,7 +120,6 @@ function main() {
   const mdPath = path.join(process.cwd(), "out.report.md");
   fs.writeFileSync(mdPath, formatReportMarkdown(report), "utf-8");
   console.log(`Markdown written: ${mdPath}`);
-
 
   console.log(`Markdown: ${outMdPath}`);
   console.log(`Input:  ${inputPath}`);
