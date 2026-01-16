@@ -1,0 +1,878 @@
+<!doctype html>
+<html lang="nl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Campaign Readiness Scan</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f7f8fb;
+        --surface: #ffffff;
+        --text: #1f2937;
+        --muted: #6b7280;
+        --border: #e5e7eb;
+        --accent: #2563eb;
+        --accent-soft: #e0e7ff;
+        --success: #16a34a;
+        --warning: #d97706;
+        --danger: #dc2626;
+        --shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+        --radius: 16px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+
+      header {
+        padding: 32px 24px 0;
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+
+      header h1 {
+        margin: 0 0 8px;
+        font-size: 2rem;
+      }
+
+      header p {
+        margin: 0 0 16px;
+        color: var(--muted);
+      }
+
+      main {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 0 24px 48px;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        gap: 24px;
+      }
+
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 24px;
+        box-shadow: var(--shadow);
+      }
+
+      .card h2 {
+        margin-top: 0;
+        font-size: 1.25rem;
+      }
+
+      .form-grid {
+        display: grid;
+        gap: 16px;
+      }
+
+      label {
+        display: block;
+        font-size: 0.9rem;
+        font-weight: 600;
+        margin-bottom: 6px;
+      }
+
+      input[type="text"],
+      input[type="email"],
+      input[type="url"],
+      textarea {
+        width: 100%;
+        padding: 10px 12px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        font-size: 0.95rem;
+      }
+
+      .helper {
+        font-size: 0.8rem;
+        color: var(--muted);
+        margin-top: 6px;
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+      }
+
+      button {
+        border: none;
+        background: var(--accent);
+        color: white;
+        padding: 10px 18px;
+        border-radius: 10px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      button.secondary {
+        background: #eef2ff;
+        color: var(--accent);
+      }
+
+      button.ghost {
+        background: transparent;
+        color: var(--muted);
+        border: 1px dashed var(--border);
+      }
+
+      button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        background: var(--accent-soft);
+        color: var(--accent);
+      }
+
+      .pill.success {
+        background: #dcfce7;
+        color: var(--success);
+      }
+
+      .pill.warning {
+        background: #fef3c7;
+        color: var(--warning);
+      }
+
+      .pill.danger {
+        background: #fee2e2;
+        color: var(--danger);
+      }
+
+      .status-line {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        flex-wrap: wrap;
+        margin: 12px 0 0;
+      }
+
+      .code-chip {
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+        background: #f3f4f6;
+        border-radius: 8px;
+        padding: 6px 10px;
+      }
+
+      .copy-group {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      .stepper {
+        display: grid;
+        gap: 12px;
+        margin-top: 16px;
+      }
+
+      .step {
+        display: flex;
+        gap: 12px;
+        align-items: flex-start;
+      }
+
+      .step span {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        background: #e5e7eb;
+        color: var(--muted);
+        font-weight: 700;
+        flex-shrink: 0;
+      }
+
+      .step.active span {
+        background: var(--accent);
+        color: white;
+      }
+
+      .step.completed span {
+        background: var(--success);
+        color: white;
+      }
+
+      .step p {
+        margin: 0;
+        font-size: 0.9rem;
+      }
+
+      .status-panel {
+        background: #f8fafc;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 16px;
+        margin-top: 16px;
+      }
+
+      .status-panel.hidden {
+        display: none;
+      }
+
+      .results-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        gap: 12px;
+        margin: 16px 0;
+      }
+
+      .result-card {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 12px;
+      }
+
+      .result-card h3 {
+        margin: 0 0 8px;
+        font-size: 0.95rem;
+      }
+
+      .result-score {
+        font-size: 1.5rem;
+        font-weight: 700;
+      }
+
+      ul {
+        padding-left: 18px;
+        margin: 8px 0 0;
+      }
+
+      details {
+        margin-top: 24px;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 12px 16px;
+        background: #f9fafb;
+      }
+
+      summary {
+        cursor: pointer;
+        font-weight: 600;
+      }
+
+      .toast-container {
+        position: fixed;
+        top: 16px;
+        right: 16px;
+        display: grid;
+        gap: 10px;
+        z-index: 1000;
+      }
+
+      .toast {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-left: 4px solid var(--accent);
+        padding: 10px 14px;
+        border-radius: 10px;
+        box-shadow: var(--shadow);
+        font-size: 0.85rem;
+      }
+
+      .toast.success {
+        border-left-color: var(--success);
+      }
+
+      .toast.error {
+        border-left-color: var(--danger);
+      }
+
+      .how-it-works {
+        display: grid;
+        gap: 8px;
+        margin-top: 20px;
+      }
+
+      .badge-row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .auth-results {
+        border: 1px dashed var(--border);
+        border-radius: 12px;
+        padding: 12px;
+        margin-top: 12px;
+        display: grid;
+        gap: 8px;
+      }
+
+      .instructions {
+        border-left: 3px solid var(--accent);
+        background: #eef2ff;
+        border-radius: 10px;
+        padding: 12px 14px;
+        margin-top: 12px;
+        display: none;
+      }
+
+      .instructions.active {
+        display: block;
+      }
+
+      @media (max-width: 720px) {
+        header {
+          padding-top: 24px;
+        }
+
+        .actions {
+          flex-direction: column;
+          align-items: stretch;
+        }
+
+        button {
+          width: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="toast-container" id="toastContainer" aria-live="polite"></div>
+    <header>
+      <h1>Campaign Readiness Scan</h1>
+      <p>Controleer je website en email-authenticatie voordat je een campagne verstuurt.</p>
+    </header>
+    <main>
+      <div class="grid">
+        <section class="card" aria-label="Form and status">
+          <h2>Start een scan</h2>
+          <form id="scanForm" class="form-grid">
+            <div>
+              <label for="websiteUrl">Website URL</label>
+              <input id="websiteUrl" name="websiteUrl" type="url" placeholder="https://example.com" required />
+            </div>
+            <div>
+              <label for="sendingEmail">Sending email</label>
+              <input id="sendingEmail" name="sendingEmail" type="email" placeholder="campaign@example.com" required />
+            </div>
+            <div>
+              <label for="customerEmail">Customer email (optional)</label>
+              <input id="customerEmail" name="customerEmail" type="email" placeholder="ops@example.com" />
+              <p class="helper">We mailen hier later automatisch de PDF.</p>
+            </div>
+            <div>
+              <label>
+                <input id="verifyByEmail" type="checkbox" />
+                Verified by test email
+              </label>
+              <p class="helper">We sturen een verificatieadres voor een echte inbox-check.</p>
+              <div id="instructionBlock" class="instructions">
+                <strong>Verification required</strong>
+                <p>Stuur binnen 24 uur een test email naar:</p>
+                <div class="copy-group">
+                  <span id="instructionAddress" class="code-chip">verify+pending@mail-verify.online</span>
+                  <button type="button" class="secondary" data-copy="instructionAddress">Copy</button>
+                </div>
+                <p class="helper">Deadline: <span id="instructionDeadline">—</span></p>
+              </div>
+            </div>
+            <div class="actions">
+              <button type="submit" id="runScan">Run scan</button>
+              <button type="button" id="resetScan" class="ghost">Reset</button>
+            </div>
+          </form>
+
+          <div class="status-panel" id="statusPanel">
+            <div class="status-line">
+              <span class="pill" id="scanStateBadge">Idle</span>
+              <span class="pill" id="reportModeBadge">Quick</span>
+            </div>
+            <div class="status-line">
+              <strong>Scan ID:</strong>
+              <span id="scanIdDisplay" class="code-chip">—</span>
+              <button type="button" class="secondary" data-copy="scanIdDisplay">Copy</button>
+            </div>
+            <div class="status-line">
+              <strong>Verification address:</strong>
+              <span id="verificationAddress" class="code-chip">—</span>
+              <button type="button" class="secondary" data-copy="verificationAddress">Copy</button>
+            </div>
+            <div class="stepper" id="stepper">
+              <div class="step" data-step="1">
+                <span>1</span>
+                <p>Scan created</p>
+              </div>
+              <div class="step" data-step="2">
+                <span>2</span>
+                <p>Website + DNS scan running</p>
+              </div>
+              <div class="step" data-step="3">
+                <span>3</span>
+                <p>Verification pending</p>
+              </div>
+              <div class="step" data-step="4">
+                <span>4</span>
+                <p>Verified + Report ready</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="how-it-works">
+            <h3>How it works</h3>
+            <ul>
+              <li>We scan your website stability + caching (3x no-cache, 3x cache)</li>
+              <li>We check DNS authentication (SPF/DKIM/DMARC)</li>
+              <li>Optional: verify with a real test email for “what inboxes actually see”</li>
+            </ul>
+          </div>
+        </section>
+
+        <section class="card" aria-label="Report preview">
+          <div class="badge-row">
+            <h2 style="margin: 0;">Report preview</h2>
+            <span id="reportBadge" class="pill">Quick</span>
+          </div>
+          <p class="helper" id="reportSubtitle">Voorlopig rapport totdat inbound verification binnen is.</p>
+          <div class="results-grid">
+            <div class="result-card">
+              <h3>Email readiness score</h3>
+              <div class="result-score" id="emailScore">—</div>
+            </div>
+            <div class="result-card">
+              <h3>Website readiness score</h3>
+              <div class="result-score" id="websiteScore">—</div>
+            </div>
+            <div class="result-card">
+              <h3>Campaign risk level</h3>
+              <div class="result-score" id="riskLevel">—</div>
+              <p class="helper" id="riskScore">—</p>
+            </div>
+          </div>
+          <div>
+            <h3>Blockers</h3>
+            <ul id="blockersList">
+              <li>—</li>
+            </ul>
+          </div>
+          <div>
+            <h3>Warnings</h3>
+            <ul id="warningsList">
+              <li>—</li>
+            </ul>
+          </div>
+
+          <div class="auth-results" id="authResults">
+            <strong>Auth results (verified)</strong>
+            <div>DKIM: <span id="dkimResult">—</span></div>
+            <div>SPF: <span id="spfResult">—</span></div>
+            <div>DMARC: <span id="dmarcResult">—</span></div>
+          </div>
+
+          <div class="actions" style="margin-top: 16px;">
+            <button type="button" id="downloadPdf">Download PDF</button>
+          </div>
+        </section>
+      </div>
+
+      <details>
+        <summary>Support / Restore</summary>
+        <div class="form-grid" style="margin-top: 12px;">
+          <div>
+            <label for="restoreScanId">Scan ID</label>
+            <input id="restoreScanId" type="text" placeholder="scan_12345" />
+          </div>
+          <div class="actions">
+            <button type="button" class="secondary" id="loadScan">Load scan</button>
+          </div>
+        </div>
+      </details>
+    </main>
+
+    <script>
+      const API = {
+        createScan: "/api/scans",
+        getScan: (id) => `/api/scans/${id}`,
+        getReport: (id) => `/api/scans/${id}/report`,
+        downloadPdf: (id) => `/api/scans/${id}/report.pdf`,
+      };
+
+      const state = {
+        scanId: null,
+        verificationAddress: null,
+        status: "idle",
+        reportReady: false,
+        emailVerificationStatus: "pending",
+        scores: null,
+        blockers: ["—"],
+        warnings: ["—"],
+        authResults: null,
+        mockMode: false,
+        startedAt: null,
+        pollHandle: null,
+      };
+
+      const elements = {
+        form: document.getElementById("scanForm"),
+        runScan: document.getElementById("runScan"),
+        resetScan: document.getElementById("resetScan"),
+        scanStateBadge: document.getElementById("scanStateBadge"),
+        reportModeBadge: document.getElementById("reportModeBadge"),
+        scanIdDisplay: document.getElementById("scanIdDisplay"),
+        verificationAddress: document.getElementById("verificationAddress"),
+        stepper: document.getElementById("stepper"),
+        reportBadge: document.getElementById("reportBadge"),
+        reportSubtitle: document.getElementById("reportSubtitle"),
+        emailScore: document.getElementById("emailScore"),
+        websiteScore: document.getElementById("websiteScore"),
+        riskLevel: document.getElementById("riskLevel"),
+        riskScore: document.getElementById("riskScore"),
+        blockersList: document.getElementById("blockersList"),
+        warningsList: document.getElementById("warningsList"),
+        downloadPdf: document.getElementById("downloadPdf"),
+        verifyByEmail: document.getElementById("verifyByEmail"),
+        instructionBlock: document.getElementById("instructionBlock"),
+        instructionAddress: document.getElementById("instructionAddress"),
+        instructionDeadline: document.getElementById("instructionDeadline"),
+        restoreScanId: document.getElementById("restoreScanId"),
+        loadScan: document.getElementById("loadScan"),
+        authResults: document.getElementById("authResults"),
+        dkimResult: document.getElementById("dkimResult"),
+        spfResult: document.getElementById("spfResult"),
+        dmarcResult: document.getElementById("dmarcResult"),
+        toastContainer: document.getElementById("toastContainer"),
+      };
+
+      const riskMap = {
+        low: "Low",
+        medium: "Medium",
+        high: "High",
+      };
+
+      function showToast(message, type = "info") {
+        const toast = document.createElement("div");
+        toast.className = `toast ${type}`;
+        toast.textContent = message;
+        elements.toastContainer.appendChild(toast);
+        setTimeout(() => {
+          toast.remove();
+        }, 3500);
+      }
+
+      function copyToClipboard(text, successMessage) {
+        navigator.clipboard
+          .writeText(text)
+          .then(() => showToast(successMessage, "success"))
+          .catch(() => showToast("Copy failed", "error"));
+      }
+
+      function getVerificationAddress(scanId) {
+        if (!scanId) return "—";
+        return `verify+${scanId}@mail-verify.online`;
+      }
+
+      function updateInstructionBlock() {
+        const active = elements.verifyByEmail.checked;
+        elements.instructionBlock.classList.toggle("active", active);
+        if (active) {
+          elements.instructionAddress.textContent = getVerificationAddress(state.scanId || "pending");
+          const deadline = new Date(Date.now() + 24 * 60 * 60 * 1000);
+          elements.instructionDeadline.textContent = deadline.toLocaleString("nl-NL");
+        }
+      }
+
+      function updateStepper(stepNumber) {
+        Array.from(elements.stepper.children).forEach((step) => {
+          const stepIndex = Number(step.dataset.step);
+          step.classList.toggle("completed", stepIndex < stepNumber);
+          step.classList.toggle("active", stepIndex === stepNumber);
+        });
+      }
+
+      function renderState() {
+        elements.scanIdDisplay.textContent = state.scanId || "—";
+        elements.verificationAddress.textContent = state.verificationAddress || "—";
+        elements.scanStateBadge.textContent = state.status === "idle" ? "Idle" : state.status;
+
+        const reportMode = state.reportReady && state.emailVerificationStatus === "verified" ? "Verified" : "Quick";
+        elements.reportModeBadge.textContent = reportMode;
+        elements.reportBadge.textContent = reportMode;
+        elements.reportSubtitle.textContent =
+          reportMode === "Verified"
+            ? "Definitief rapport met inbound verificatie."
+            : "Voorlopig rapport totdat inbound verification binnen is.";
+
+        const statusStyle =
+          state.status === "verified" ? "success" : state.status === "error" ? "danger" : "warning";
+        elements.scanStateBadge.className = `pill ${statusStyle}`;
+
+        elements.emailScore.textContent = state.scores?.email_readiness?.score ?? "—";
+        elements.websiteScore.textContent = state.scores?.website_readiness?.score ?? "—";
+        const riskLevel = state.scores?.campaign_risk?.level || "—";
+        elements.riskLevel.textContent = riskMap[riskLevel] || riskLevel;
+        elements.riskScore.textContent = state.scores?.campaign_risk?.score
+          ? `Score ${state.scores.campaign_risk.score}`
+          : "—";
+
+        elements.blockersList.innerHTML = "";
+        state.blockers.forEach((item) => {
+          const li = document.createElement("li");
+          li.textContent = item;
+          elements.blockersList.appendChild(li);
+        });
+
+        elements.warningsList.innerHTML = "";
+        state.warnings.forEach((item) => {
+          const li = document.createElement("li");
+          li.textContent = item;
+          elements.warningsList.appendChild(li);
+        });
+
+        elements.authResults.style.display = state.emailVerificationStatus === "verified" ? "grid" : "none";
+        if (state.authResults) {
+          elements.dkimResult.textContent = state.authResults.dkim;
+          elements.spfResult.textContent = state.authResults.spf;
+          elements.dmarcResult.textContent = state.authResults.dmarc;
+        }
+
+        if (state.status === "idle") {
+          updateStepper(1);
+        } else if (state.status === "running") {
+          updateStepper(2);
+        } else if (state.status === "pending") {
+          updateStepper(3);
+        } else if (state.status === "verified") {
+          updateStepper(4);
+        } else if (state.status === "error") {
+          updateStepper(2);
+        }
+
+        updateInstructionBlock();
+      }
+
+      function buildMockState() {
+        const elapsed = Date.now() - state.startedAt;
+        if (elapsed < 4000) {
+          state.status = "running";
+          state.emailVerificationStatus = "pending";
+          state.reportReady = false;
+        } else if (elapsed < 9000) {
+          state.status = "pending";
+          state.emailVerificationStatus = "pending";
+          state.reportReady = false;
+        } else {
+          state.status = "verified";
+          state.emailVerificationStatus = "verified";
+          state.reportReady = true;
+          state.authResults = {
+            dkim: "pass (selector=campaign2024, domain=example.com)",
+            spf: "pass (domain=example.com, ip=203.0.113.4)",
+            dmarc: "pass (policy=quarantine)",
+          };
+        }
+
+        if (!state.scores) {
+          state.scores = {
+            email_readiness: { score: 84 },
+            website_readiness: { score: 78 },
+            campaign_risk: { level: "medium", score: 62 },
+          };
+          state.blockers = ["Missing BIMI record", "Unverified subdomain used in From address"];
+          state.warnings = ["Homepage cache hit rate below 70%", "SPF record close to 10 lookup limit"];
+        }
+      }
+
+      async function createScan(payload) {
+        // TODO: Replace this fetch with your production API endpoint integration.
+        const response = await fetch(API.createScan, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(payload),
+        });
+
+        if (!response.ok) {
+          throw new Error("Create scan failed");
+        }
+
+        return response.json();
+      }
+
+      async function fetchScan(scanId) {
+        // TODO: Replace this fetch with your production API endpoint integration.
+        const response = await fetch(API.getScan(scanId));
+        if (!response.ok) {
+          throw new Error("Get scan failed");
+        }
+        return response.json();
+      }
+
+      async function pollScan() {
+        if (!state.scanId) return;
+        const elapsed = Date.now() - state.startedAt;
+        if (elapsed > 10 * 60 * 1000) {
+          state.status = "error";
+          showToast("Scan timed out after 10 minutes", "error");
+          stopPolling();
+          renderState();
+          return;
+        }
+
+        try {
+          const data = await fetchScan(state.scanId);
+          state.emailVerificationStatus = data.email_verification?.status || "pending";
+          state.verificationAddress = data.email_verification?.verification_address || getVerificationAddress(state.scanId);
+          state.scores = data.scores || state.scores;
+          state.reportReady = Boolean(data.report_ready);
+          state.authResults = data.email_verification?.auth_results
+            ? {
+                dkim: `${data.email_verification.auth_results.dkim?.result || ""} (${data.email_verification.auth_results.dkim?.domain || ""}, selector=${data.email_verification.auth_results.dkim?.selector || ""})`,
+                spf: `${data.email_verification.auth_results.spf?.result || ""} (${data.email_verification.auth_results.spf?.domain || ""}, ip=${data.email_verification.auth_results.spf?.ip || ""})`,
+                dmarc: `${data.email_verification.auth_results.dmarc?.result || ""} (policy=${data.email_verification.auth_results.dmarc?.policy || ""})`,
+              }
+            : state.authResults;
+
+          if (state.emailVerificationStatus === "verified" && state.reportReady) {
+            state.status = "verified";
+            stopPolling();
+          } else if (state.emailVerificationStatus === "pending") {
+            state.status = "pending";
+          } else {
+            state.status = "running";
+          }
+        } catch (error) {
+          state.mockMode = true;
+          buildMockState();
+        }
+
+        renderState();
+      }
+
+      function startPolling() {
+        stopPolling();
+        pollScan();
+        state.pollHandle = setInterval(pollScan, 3000);
+      }
+
+      function stopPolling() {
+        if (state.pollHandle) {
+          clearInterval(state.pollHandle);
+          state.pollHandle = null;
+        }
+      }
+
+      function resetState() {
+        stopPolling();
+        state.scanId = null;
+        state.verificationAddress = null;
+        state.status = "idle";
+        state.reportReady = false;
+        state.emailVerificationStatus = "pending";
+        state.scores = null;
+        state.blockers = ["—"];
+        state.warnings = ["—"];
+        state.authResults = null;
+        state.mockMode = false;
+        state.startedAt = null;
+        renderState();
+      }
+
+      elements.form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const payload = {
+          website_url: elements.form.websiteUrl.value,
+          sending_email: elements.form.sendingEmail.value,
+          verify_by_email: elements.verifyByEmail.checked,
+          customer_email: elements.form.customerEmail.value || undefined,
+        };
+
+        elements.runScan.disabled = true;
+        state.status = "running";
+        state.startedAt = Date.now();
+        renderState();
+
+        try {
+          const data = await createScan(payload);
+          state.scanId = data.scan_id;
+          state.verificationAddress = data.verification_address || getVerificationAddress(state.scanId);
+          state.status = "running";
+          state.mockMode = false;
+          showToast("Scan created", "success");
+        } catch (error) {
+          state.mockMode = true;
+          state.scanId = crypto.randomUUID();
+          state.verificationAddress = getVerificationAddress(state.scanId);
+          state.status = "running";
+          showToast("API unavailable, running in mock mode", "error");
+        }
+
+        elements.runScan.disabled = false;
+        updateInstructionBlock();
+        renderState();
+        startPolling();
+      });
+
+      elements.resetScan.addEventListener("click", () => {
+        resetState();
+      });
+
+      elements.verifyByEmail.addEventListener("change", () => {
+        updateInstructionBlock();
+      });
+
+      elements.loadScan.addEventListener("click", () => {
+        const scanId = elements.restoreScanId.value.trim();
+        if (!scanId) {
+          showToast("Enter a scan ID", "error");
+          return;
+        }
+        state.scanId = scanId;
+        state.startedAt = Date.now();
+        state.status = "running";
+        state.verificationAddress = getVerificationAddress(scanId);
+        showToast("Loading scan...", "info");
+        renderState();
+        startPolling();
+      });
+
+      elements.downloadPdf.addEventListener("click", () => {
+        if (!state.scanId) {
+          showToast("Run a scan first", "error");
+          return;
+        }
+        if (state.mockMode) {
+          showToast("PDF not available in mock mode", "error");
+          return;
+        }
+        window.open(API.downloadPdf(state.scanId), "_blank");
+      });
+
+      document.body.addEventListener("click", (event) => {
+        const target = event.target;
+        if (target instanceof HTMLElement && target.dataset.copy) {
+          const text = document.getElementById(target.dataset.copy)?.textContent || "";
+          copyToClipboard(text, "Copied to clipboard");
+        }
+      });
+
+      resetState();
+    </script>
+  </body>
+</html>
