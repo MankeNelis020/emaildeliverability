@@ -6,19 +6,20 @@
     <title>Campaign Readiness Scan</title>
     <style>
       :root {
-        color-scheme: light;
-        --bg: #f7f8fb;
-        --surface: #ffffff;
-        --text: #1f2937;
-        --muted: #6b7280;
-        --border: #e5e7eb;
-        --accent: #2563eb;
-        --accent-soft: #e0e7ff;
-        --success: #16a34a;
-        --warning: #d97706;
-        --danger: #dc2626;
-        --shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
-        --radius: 16px;
+        color-scheme: dark;
+        --bg: #050608;
+        --surface: #0f1116;
+        --surface-alt: #141720;
+        --text: #f8fafc;
+        --muted: #9aa3b2;
+        --border: rgba(255, 255, 255, 0.08);
+        --accent: #7c5cff;
+        --accent-soft: rgba(124, 92, 255, 0.18);
+        --success: #22c55e;
+        --warning: #facc15;
+        --danger: #f87171;
+        --shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+        --radius: 18px;
       }
 
       * {
@@ -28,24 +29,25 @@
       body {
         margin: 0;
         font-family: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
-        background: var(--bg);
+        background: radial-gradient(circle at top, #121520, #050608 50%);
         color: var(--text);
       }
 
       header {
-        padding: 32px 24px 0;
+        padding: 40px 24px 0;
         max-width: 1200px;
         margin: 0 auto;
       }
 
       header h1 {
         margin: 0 0 8px;
-        font-size: 2rem;
+        font-size: clamp(2rem, 3vw, 2.6rem);
       }
 
       header p {
         margin: 0 0 16px;
         color: var(--muted);
+        max-width: 720px;
       }
 
       main {
@@ -94,6 +96,8 @@
         border: 1px solid var(--border);
         border-radius: 10px;
         font-size: 0.95rem;
+        background: var(--surface-alt);
+        color: var(--text);
       }
 
       .helper {
@@ -113,14 +117,14 @@
         border: none;
         background: var(--accent);
         color: white;
-        padding: 10px 18px;
-        border-radius: 10px;
+        padding: 12px 18px;
+        border-radius: 12px;
         font-weight: 600;
         cursor: pointer;
       }
 
       button.secondary {
-        background: #eef2ff;
+        background: var(--accent-soft);
         color: var(--accent);
       }
 
@@ -171,7 +175,7 @@
 
       .code-chip {
         font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-        background: #f3f4f6;
+        background: rgba(148, 163, 184, 0.15);
         border-radius: 8px;
         padding: 6px 10px;
       }
@@ -224,7 +228,7 @@
       }
 
       .status-panel {
-        background: #f8fafc;
+        background: var(--surface-alt);
         border: 1px solid var(--border);
         border-radius: 12px;
         padding: 16px;
@@ -246,6 +250,7 @@
         border: 1px solid var(--border);
         border-radius: 12px;
         padding: 12px;
+        background: var(--surface-alt);
       }
 
       .result-card h3 {
@@ -268,7 +273,7 @@
         border: 1px solid var(--border);
         border-radius: 12px;
         padding: 12px 16px;
-        background: #f9fafb;
+        background: var(--surface);
       }
 
       summary {
@@ -324,17 +329,71 @@
         gap: 8px;
       }
 
-      .instructions {
-        border-left: 3px solid var(--accent);
-        background: #eef2ff;
-        border-radius: 10px;
-        padding: 12px 14px;
-        margin-top: 12px;
+      .scan-type-toggle {
+        display: inline-flex;
+        gap: 8px;
+        padding: 6px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: var(--surface);
+      }
+
+      .scan-type-toggle button {
+        background: transparent;
+        color: var(--muted);
+        padding: 8px 14px;
+        border-radius: 999px;
+        border: 1px solid transparent;
+      }
+
+      .scan-type-toggle button.active {
+        background: var(--accent);
+        color: white;
+        border-color: var(--accent);
+      }
+
+      .cta-panel {
+        display: grid;
+        gap: 16px;
+      }
+
+      .hidden {
         display: none;
       }
 
-      .instructions.active {
-        display: block;
+      .cta-panel h2 {
+        font-size: 1.6rem;
+      }
+
+      .cta-copy {
+        color: var(--muted);
+      }
+
+      .modal {
+        position: fixed;
+        inset: 0;
+        background: rgba(3, 7, 18, 0.72);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        z-index: 1200;
+      }
+
+      .modal.hidden {
+        display: none;
+      }
+
+      .modal-content {
+        background: var(--surface);
+        border-radius: var(--radius);
+        padding: 24px;
+        max-width: 460px;
+        width: 100%;
+        border: 1px solid var(--border);
+        box-shadow: var(--shadow);
+        display: grid;
+        gap: 12px;
       }
 
       @media (max-width: 720px) {
@@ -357,44 +416,43 @@
     <div class="toast-container" id="toastContainer" aria-live="polite"></div>
     <header>
       <h1>Campaign Readiness Scan</h1>
-      <p>Controleer je website en email-authenticatie voordat je een campagne verstuurt.</p>
+      <p>Een snelle, sales-ready scan die laat zien of je website én email setup klaar zijn voor je volgende campagne.</p>
+      <div class="scan-type-toggle" role="tablist" aria-label="Scan type">
+        <button type="button" class="active" data-scan-type="basic" role="tab" aria-selected="true">
+          Basic scan
+        </button>
+        <button type="button" data-scan-type="verified" role="tab" aria-selected="false">Verified scan</button>
+      </div>
     </header>
     <main>
       <div class="grid">
         <section class="card" aria-label="Form and status">
-          <h2>Start een scan</h2>
-          <form id="scanForm" class="form-grid">
+          <div class="cta-panel">
+            <div>
+              <h2>Run een scan in 2 minuten.</h2>
+              <p class="cta-copy">
+                Ontvang direct een readiness score en verzamel proof dat je campagne klaar is. Kies Basic voor een snelle
+                health check of Verified voor een volledige inbox-validatie.
+              </p>
+            </div>
+          </div>
+          <form id="scanForm" class="form-grid" style="margin-top: 16px;">
             <div>
               <label for="websiteUrl">Website URL</label>
               <input id="websiteUrl" name="websiteUrl" type="url" placeholder="https://example.com" required />
             </div>
-            <div>
+            <div id="sendingEmailGroup">
               <label for="sendingEmail">Sending email</label>
               <input id="sendingEmail" name="sendingEmail" type="email" placeholder="campaign@example.com" required />
+              <p class="helper">Alleen nodig voor de Verified scan.</p>
             </div>
             <div>
               <label for="customerEmail">Customer email (optional)</label>
               <input id="customerEmail" name="customerEmail" type="email" placeholder="ops@example.com" />
               <p class="helper">We mailen hier later automatisch de PDF.</p>
             </div>
-            <div>
-              <label>
-                <input id="verifyByEmail" type="checkbox" />
-                Verified by test email
-              </label>
-              <p class="helper">We sturen een verificatieadres voor een echte inbox-check.</p>
-              <div id="instructionBlock" class="instructions">
-                <strong>Verification required</strong>
-                <p>Stuur binnen 24 uur een test email naar:</p>
-                <div class="copy-group">
-                  <span id="instructionAddress" class="code-chip">verify+pending@mail-verify.online</span>
-                  <button type="button" class="secondary" data-copy="instructionAddress">Copy</button>
-                </div>
-                <p class="helper">Deadline: <span id="instructionDeadline">—</span></p>
-              </div>
-            </div>
             <div class="actions">
-              <button type="submit" id="runScan">Run scan</button>
+              <button type="submit" id="runScan">Purchase & run scan</button>
               <button type="button" id="resetScan" class="ghost">Reset</button>
             </div>
           </form>
@@ -403,6 +461,7 @@
             <div class="status-line">
               <span class="pill" id="scanStateBadge">Idle</span>
               <span class="pill" id="reportModeBadge">Quick</span>
+              <span class="pill" id="scanTypeBadge">Basic</span>
             </div>
             <div class="status-line">
               <strong>Scan ID:</strong>
@@ -449,7 +508,7 @@
             <h2 style="margin: 0;">Report preview</h2>
             <span id="reportBadge" class="pill">Quick</span>
           </div>
-          <p class="helper" id="reportSubtitle">Voorlopig rapport totdat inbound verification binnen is.</p>
+          <p class="helper" id="reportSubtitle">Basic rapport zonder inbound verificatie.</p>
           <div class="results-grid">
             <div class="result-card">
               <h3>Email readiness score</h3>
@@ -505,6 +564,21 @@
       </details>
     </main>
 
+    <div class="modal hidden" id="verificationModal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="modal-content">
+        <h3 id="modalTitle">Verification required</h3>
+        <p class="helper">Stuur binnen 24 uur een test email naar het unieke adres hieronder om de Verified scan te voltooien.</p>
+        <div class="copy-group">
+          <span id="modalVerificationAddress" class="code-chip">verify+pending@mail-verify.online</span>
+          <button type="button" class="secondary" data-copy="modalVerificationAddress">Copy</button>
+        </div>
+        <p class="helper">Deadline: <span id="modalDeadline">—</span></p>
+        <div class="actions">
+          <button type="button" class="secondary" id="modalClose">Got it</button>
+        </div>
+      </div>
+    </div>
+
     <script>
       const API = {
         createScan: "/api/scans",
@@ -526,6 +600,7 @@
         mockMode: false,
         startedAt: null,
         pollHandle: null,
+        scanType: "basic",
       };
 
       const elements = {
@@ -546,10 +621,9 @@
         blockersList: document.getElementById("blockersList"),
         warningsList: document.getElementById("warningsList"),
         downloadPdf: document.getElementById("downloadPdf"),
-        verifyByEmail: document.getElementById("verifyByEmail"),
-        instructionBlock: document.getElementById("instructionBlock"),
-        instructionAddress: document.getElementById("instructionAddress"),
-        instructionDeadline: document.getElementById("instructionDeadline"),
+        scanTypeToggle: document.querySelectorAll("[data-scan-type]"),
+        scanTypeBadge: document.getElementById("scanTypeBadge"),
+        sendingEmailGroup: document.getElementById("sendingEmailGroup"),
         restoreScanId: document.getElementById("restoreScanId"),
         loadScan: document.getElementById("loadScan"),
         authResults: document.getElementById("authResults"),
@@ -557,6 +631,10 @@
         spfResult: document.getElementById("spfResult"),
         dmarcResult: document.getElementById("dmarcResult"),
         toastContainer: document.getElementById("toastContainer"),
+        verificationModal: document.getElementById("verificationModal"),
+        modalVerificationAddress: document.getElementById("modalVerificationAddress"),
+        modalDeadline: document.getElementById("modalDeadline"),
+        modalClose: document.getElementById("modalClose"),
       };
 
       const riskMap = {
@@ -587,14 +665,27 @@
         return `verify+${scanId}@mail-verify.online`;
       }
 
-      function updateInstructionBlock() {
-        const active = elements.verifyByEmail.checked;
-        elements.instructionBlock.classList.toggle("active", active);
-        if (active) {
-          elements.instructionAddress.textContent = getVerificationAddress(state.scanId || "pending");
-          const deadline = new Date(Date.now() + 24 * 60 * 60 * 1000);
-          elements.instructionDeadline.textContent = deadline.toLocaleString("nl-NL");
-        }
+      function updateScanTypeUI() {
+        elements.scanTypeToggle.forEach((button) => {
+          const isActive = button.dataset.scanType === state.scanType;
+          button.classList.toggle("active", isActive);
+          button.setAttribute("aria-selected", String(isActive));
+        });
+        elements.scanTypeBadge.textContent = state.scanType === "verified" ? "Verified" : "Basic";
+        const sendingEmailRequired = state.scanType === "verified";
+        elements.sendingEmailGroup.classList.toggle("hidden", !sendingEmailRequired);
+        elements.form.sendingEmail.required = sendingEmailRequired;
+      }
+
+      function openVerificationModal() {
+        const deadline = new Date(Date.now() + 24 * 60 * 60 * 1000);
+        elements.modalVerificationAddress.textContent = getVerificationAddress(state.scanId || "pending");
+        elements.modalDeadline.textContent = deadline.toLocaleString("nl-NL");
+        elements.verificationModal.classList.remove("hidden");
+      }
+
+      function closeVerificationModal() {
+        elements.verificationModal.classList.add("hidden");
       }
 
       function updateStepper(stepNumber) {
@@ -610,17 +701,22 @@
         elements.verificationAddress.textContent = state.verificationAddress || "—";
         elements.scanStateBadge.textContent = state.status === "idle" ? "Idle" : state.status;
 
-        const reportMode = state.reportReady && state.emailVerificationStatus === "verified" ? "Verified" : "Quick";
+        const reportMode =
+          state.scanType === "verified" && state.reportReady && state.emailVerificationStatus === "verified"
+            ? "Verified"
+            : "Quick";
         elements.reportModeBadge.textContent = reportMode;
         elements.reportBadge.textContent = reportMode;
         elements.reportSubtitle.textContent =
           reportMode === "Verified"
             ? "Definitief rapport met inbound verificatie."
-            : "Voorlopig rapport totdat inbound verification binnen is.";
+            : state.scanType === "verified"
+              ? "Voorlopig rapport totdat inbound verification binnen is."
+              : "Basic rapport zonder inbound verificatie.";
 
         const statusStyle =
-          state.status === "verified" ? "success" : state.status === "error" ? "danger" : "warning";
-        elements.scanStateBadge.className = `pill ${statusStyle}`;
+          state.status === "verified" ? "success" : state.status === "error" ? "danger" : state.status === "idle" ? "" : "warning";
+        elements.scanStateBadge.className = statusStyle ? `pill ${statusStyle}` : "pill";
 
         elements.emailScore.textContent = state.scores?.email_readiness?.score ?? "—";
         elements.websiteScore.textContent = state.scores?.website_readiness?.score ?? "—";
@@ -663,12 +759,16 @@
           updateStepper(2);
         }
 
-        updateInstructionBlock();
+        updateScanTypeUI();
       }
 
       function buildMockState() {
         const elapsed = Date.now() - state.startedAt;
-        if (elapsed < 4000) {
+        if (state.scanType === "basic") {
+          state.status = "verified";
+          state.emailVerificationStatus = "verified";
+          state.reportReady = true;
+        } else if (elapsed < 4000) {
           state.status = "running";
           state.emailVerificationStatus = "pending";
           state.reportReady = false;
@@ -741,6 +841,9 @@
           state.verificationAddress = data.email_verification?.verification_address || getVerificationAddress(state.scanId);
           state.scores = data.scores || state.scores;
           state.reportReady = Boolean(data.report_ready);
+          if (state.scanType === "basic") {
+            state.emailVerificationStatus = "not_required";
+          }
           state.authResults = data.email_verification?.auth_results
             ? {
                 dkim: `${data.email_verification.auth_results.dkim?.result || ""} (${data.email_verification.auth_results.dkim?.domain || ""}, selector=${data.email_verification.auth_results.dkim?.selector || ""})`,
@@ -749,7 +852,11 @@
               }
             : state.authResults;
 
-          if (state.emailVerificationStatus === "verified" && state.reportReady) {
+          if (state.scanType === "basic" && state.reportReady) {
+            state.status = "verified";
+            state.emailVerificationStatus = "verified";
+            stopPolling();
+          } else if (state.emailVerificationStatus === "verified" && state.reportReady) {
             state.status = "verified";
             stopPolling();
           } else if (state.emailVerificationStatus === "pending") {
@@ -792,14 +899,15 @@
         state.mockMode = false;
         state.startedAt = null;
         renderState();
+        closeVerificationModal();
       }
 
       elements.form.addEventListener("submit", async (event) => {
         event.preventDefault();
         const payload = {
           website_url: elements.form.websiteUrl.value,
-          sending_email: elements.form.sendingEmail.value,
-          verify_by_email: elements.verifyByEmail.checked,
+          sending_email: state.scanType === "verified" ? elements.form.sendingEmail.value : undefined,
+          verify_by_email: state.scanType === "verified",
           customer_email: elements.form.customerEmail.value || undefined,
         };
 
@@ -812,20 +920,22 @@
           const data = await createScan(payload);
           state.scanId = data.scan_id;
           state.verificationAddress = data.verification_address || getVerificationAddress(state.scanId);
-          state.status = "running";
+          state.status = state.scanType === "verified" ? "pending" : "running";
           state.mockMode = false;
           showToast("Scan created", "success");
         } catch (error) {
           state.mockMode = true;
           state.scanId = crypto.randomUUID();
           state.verificationAddress = getVerificationAddress(state.scanId);
-          state.status = "running";
+          state.status = state.scanType === "verified" ? "pending" : "running";
           showToast("API unavailable, running in mock mode", "error");
         }
 
         elements.runScan.disabled = false;
-        updateInstructionBlock();
         renderState();
+        if (state.scanType === "verified") {
+          openVerificationModal();
+        }
         startPolling();
       });
 
@@ -833,8 +943,11 @@
         resetState();
       });
 
-      elements.verifyByEmail.addEventListener("change", () => {
-        updateInstructionBlock();
+      elements.scanTypeToggle.forEach((button) => {
+        button.addEventListener("click", () => {
+          state.scanType = button.dataset.scanType === "verified" ? "verified" : "basic";
+          updateScanTypeUI();
+        });
       });
 
       elements.loadScan.addEventListener("click", () => {
@@ -869,6 +982,16 @@
         if (target instanceof HTMLElement && target.dataset.copy) {
           const text = document.getElementById(target.dataset.copy)?.textContent || "";
           copyToClipboard(text, "Copied to clipboard");
+        }
+      });
+
+      elements.modalClose.addEventListener("click", () => {
+        closeVerificationModal();
+      });
+
+      elements.verificationModal.addEventListener("click", (event) => {
+        if (event.target === elements.verificationModal) {
+          closeVerificationModal();
         }
       });
 
