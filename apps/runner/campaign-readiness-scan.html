@@ -50,6 +50,35 @@
         max-width: 720px;
       }
 
+      .header-actions {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-top: 16px;
+      }
+
+      .header-actions a {
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 12px 18px;
+        border-radius: 12px;
+        font-weight: 600;
+        border: 1px solid transparent;
+      }
+
+      .header-actions a.primary {
+        background: var(--accent);
+        color: white;
+      }
+
+      .header-actions a.secondary {
+        background: var(--surface-alt);
+        color: var(--text);
+        border-color: var(--border);
+      }
+
       main {
         max-width: 1200px;
         margin: 0 auto;
@@ -444,6 +473,32 @@
         font-weight: 700;
       }
 
+      footer {
+        margin-top: 48px;
+        background: var(--surface);
+        border-top: 1px solid var(--border);
+        padding: 32px 24px 40px;
+      }
+
+      .footer-grid {
+        max-width: 1200px;
+        margin: 0 auto;
+        display: grid;
+        gap: 16px;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      }
+
+      .footer-card {
+        background: var(--surface-alt);
+        border-radius: 14px;
+        border: 1px solid var(--border);
+        padding: 16px;
+      }
+
+      .footer-card h4 {
+        margin-top: 0;
+      }
+
       @media (max-width: 720px) {
         header {
           padding-top: 24px;
@@ -465,13 +520,9 @@
     <header>
       <h1>Campaign Readiness Scan</h1>
       <p>Een snelle, sales-ready scan die laat zien of je website én email setup klaar zijn voor je volgende campagne.</p>
-      <div class="scan-type-toggle" role="tablist" aria-label="Scan type">
-        <button type="button" class="active" data-scan-type="basic" data-scan-toggle role="tab" aria-selected="true">
-          Basic scan
-        </button>
-        <button type="button" data-scan-type="verified" data-scan-toggle role="tab" aria-selected="false">
-          Verified scan
-        </button>
+      <div class="header-actions">
+        <a class="primary" href="#scan-tool">Start scan</a>
+        <a class="secondary" href="#contact">Contact</a>
       </div>
     </header>
     <main>
@@ -503,8 +554,16 @@
           </div>
         </div>
       </section>
-      <div class="grid">
+      <div class="grid" id="scan-tool">
         <section class="card" aria-label="Form and status">
+          <div class="scan-type-toggle" role="tablist" aria-label="Scan type">
+            <button type="button" class="active" data-scan-type="basic" data-scan-toggle role="tab" aria-selected="true">
+              Basic scan
+            </button>
+            <button type="button" data-scan-type="verified" data-scan-toggle role="tab" aria-selected="false">
+              Verified scan
+            </button>
+          </div>
           <div class="cta-panel">
             <div>
               <h2>Run een scan in 2 minuten.</h2>
@@ -642,6 +701,31 @@
       </details>
     </main>
 
+    <footer id="contact">
+      <div class="footer-grid">
+        <div>
+          <h3>Need help with deliverability?</h3>
+          <p class="helper">Vraag ons team om advies over SPF/DKIM/DMARC of inbox placement.</p>
+          <div class="actions">
+            <button type="button" class="secondary" id="footerEnquiry">Plan advisory call</button>
+          </div>
+        </div>
+        <div class="footer-card">
+          <h4>Contact</h4>
+          <p class="helper">sales@mail-verify.online</p>
+          <p class="helper">+31 20 000 0000</p>
+        </div>
+        <div class="footer-card">
+          <h4>What you get</h4>
+          <ul>
+            <li>Actionable scan report</li>
+            <li>Priority checklist</li>
+            <li>Optional verification flow</li>
+          </ul>
+        </div>
+      </div>
+    </footer>
+
     <div class="modal hidden" id="verificationModal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
       <div class="modal-content">
         <h3 id="modalTitle">Verification required</h3>
@@ -715,6 +799,7 @@
         modalDeadline: document.getElementById("modalDeadline"),
         modalClose: document.getElementById("modalClose"),
         enquiryCta: document.getElementById("enquiryCta"),
+        footerEnquiry: document.getElementById("footerEnquiry"),
       };
 
       const riskMap = {
@@ -1077,6 +1162,12 @@
 
       if (elements.enquiryCta) {
         elements.enquiryCta.addEventListener("click", () => {
+          showToast("Thanks! We will contact you for advisory options.", "success");
+        });
+      }
+
+      if (elements.footerEnquiry) {
+        elements.footerEnquiry.addEventListener("click", () => {
           showToast("Thanks! We will contact you for advisory options.", "success");
         });
       }
