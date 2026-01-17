@@ -396,6 +396,54 @@
         gap: 12px;
       }
 
+      .pricing-section {
+        margin: 32px 0 12px;
+        background: var(--surface);
+        border-radius: var(--radius);
+        border: 1px solid var(--border);
+        padding: 24px;
+        box-shadow: var(--shadow);
+      }
+
+      .pricing-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        flex-wrap: wrap;
+        margin-bottom: 16px;
+      }
+
+      .pricing-header p {
+        color: var(--muted);
+        margin: 0;
+      }
+
+      .pricing-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 16px;
+      }
+
+      .pricing-card {
+        background: var(--surface-alt);
+        border-radius: 16px;
+        border: 1px solid var(--border);
+        padding: 18px;
+        display: grid;
+        gap: 10px;
+      }
+
+      .pricing-card h4 {
+        margin: 0;
+        font-size: 1.05rem;
+      }
+
+      .price-tag {
+        font-size: 1.6rem;
+        font-weight: 700;
+      }
+
       @media (max-width: 720px) {
         header {
           padding-top: 24px;
@@ -418,13 +466,43 @@
       <h1>Campaign Readiness Scan</h1>
       <p>Een snelle, sales-ready scan die laat zien of je website én email setup klaar zijn voor je volgende campagne.</p>
       <div class="scan-type-toggle" role="tablist" aria-label="Scan type">
-        <button type="button" class="active" data-scan-type="basic" role="tab" aria-selected="true">
+        <button type="button" class="active" data-scan-type="basic" data-scan-toggle role="tab" aria-selected="true">
           Basic scan
         </button>
-        <button type="button" data-scan-type="verified" role="tab" aria-selected="false">Verified scan</button>
+        <button type="button" data-scan-type="verified" data-scan-toggle role="tab" aria-selected="false">
+          Verified scan
+        </button>
       </div>
     </header>
     <main>
+      <section class="pricing-section" aria-label="Pricing">
+        <div class="pricing-header">
+          <div>
+            <h2 style="margin: 0 0 6px;">Choose your scan</h2>
+            <p>Transparante pricing voor teams die snelheid, zekerheid en deliverability willen.</p>
+          </div>
+        </div>
+        <div class="pricing-grid">
+          <div class="pricing-card">
+            <h4>Basic scan</h4>
+            <div class="price-tag">€10</div>
+            <p class="helper">Gebaseerd op standaard DNS records + website health.</p>
+            <button type="button" class="secondary" data-scan-type="basic">Select basic</button>
+          </div>
+          <div class="pricing-card">
+            <h4>Verified scan</h4>
+            <div class="price-tag">€30</div>
+            <p class="helper">Inclusief inbound verificatie + auth results parsing.</p>
+            <button type="button" class="secondary" data-scan-type="verified">Select verified</button>
+          </div>
+          <div class="pricing-card">
+            <h4>Professional advisory</h4>
+            <div class="price-tag">€100 <span class="helper">/ p.h.</span></div>
+            <p class="helper">Hulp bij implementatie, troubleshooting & deliverability strategy.</p>
+            <button type="button" class="ghost" id="enquiryCta">Get enquiry</button>
+          </div>
+        </div>
+      </section>
       <div class="grid">
         <section class="card" aria-label="Form and status">
           <div class="cta-panel">
@@ -621,7 +699,8 @@
         blockersList: document.getElementById("blockersList"),
         warningsList: document.getElementById("warningsList"),
         downloadPdf: document.getElementById("downloadPdf"),
-        scanTypeToggle: document.querySelectorAll("[data-scan-type]"),
+        scanTypeToggle: document.querySelectorAll("[data-scan-toggle]"),
+        scanTypeButtons: document.querySelectorAll("[data-scan-type]"),
         scanTypeBadge: document.getElementById("scanTypeBadge"),
         sendingEmailGroup: document.getElementById("sendingEmailGroup"),
         restoreScanId: document.getElementById("restoreScanId"),
@@ -635,6 +714,7 @@
         modalVerificationAddress: document.getElementById("modalVerificationAddress"),
         modalDeadline: document.getElementById("modalDeadline"),
         modalClose: document.getElementById("modalClose"),
+        enquiryCta: document.getElementById("enquiryCta"),
       };
 
       const riskMap = {
@@ -943,7 +1023,7 @@
         resetState();
       });
 
-      elements.scanTypeToggle.forEach((button) => {
+      elements.scanTypeButtons.forEach((button) => {
         button.addEventListener("click", () => {
           state.scanType = button.dataset.scanType === "verified" ? "verified" : "basic";
           updateScanTypeUI();
@@ -994,6 +1074,12 @@
           closeVerificationModal();
         }
       });
+
+      if (elements.enquiryCta) {
+        elements.enquiryCta.addEventListener("click", () => {
+          showToast("Thanks! We will contact you for advisory options.", "success");
+        });
+      }
 
       resetState();
     </script>
