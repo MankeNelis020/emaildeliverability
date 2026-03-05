@@ -4,7 +4,7 @@ import { performance } from "node:perf_hooks";
 type CacheMode = "no-cache" | "cache";
 
 
-export type WebsiteHttpScan = {
+export type scanWebsiteHttp = {
   aggregates: {
     mobile: { p95: { ttfb_ms: number | null; lcp_ms?: number | null; cls?: number | null; inp_ms?: number | null } };
     desktop: { p95: { ttfb_ms: number | null; lcp_ms?: number | null; cls?: number | null; inp_ms?: number | null } };
@@ -107,7 +107,7 @@ function withCacheBust(url: string): string {
 }
 
 
-async function oneFetch(url: string, mode: CacheMode): Promise<WebsiteHttpScan["aggregates"]["http"]["samples"][number]> {
+async function oneFetch(url: string, mode: CacheMode): Promise<scanWebsiteHttp["aggregates"]["http"]["samples"][number]> {
   const target = mode === "no-cache" ? withCacheBust(url) : url;
 
 
@@ -205,12 +205,12 @@ async function oneFetch(url: string, mode: CacheMode): Promise<WebsiteHttpScan["
 export async function scanWebsiteHttp(
   url: string,
   opts?: { noCacheSamples?: number; cacheSamples?: number }
-): Promise<WebsiteHttpScan> {
+): Promise<scanWebsiteHttp> {
   const noCacheSamples = opts?.noCacheSamples ?? 3;
   const cacheSamples = opts?.cacheSamples ?? 3;
 
 
-  const samples: WebsiteHttpScan["aggregates"]["http"]["samples"] = [];
+  const samples: scanWebsiteHttp["aggregates"]["http"]["samples"] = [];
 
 
   for (let i = 0; i < noCacheSamples; i++) samples.push(await oneFetch(url, "no-cache"));

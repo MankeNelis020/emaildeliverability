@@ -61,3 +61,18 @@ export async function getScan(scanId: string): Promise<ScanReport> {
     throw new Error("Unable to load scan report.");
   }
 }
+
+export async function createCheckoutSession(sku: "basic" | "verified") {
+  const response = await fetchWithTimeout(`${baseURL}/api/checkout/create-session`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sku }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data?.error || "Failed to create checkout session");
+  }
+
+  return data as { url: string; purchaseId: string };
+}

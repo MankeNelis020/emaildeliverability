@@ -10,3 +10,19 @@ out.scan-result.json
 out.report.json
 apps/runner/out.scan-result.json
 apps/runner/out.report.json
+
+# PDFs / artifacts (generated)
+report.pdf
+apps/runner/*.pdf
+apps/runner/artifacts/
+apps/runner/src/pdf/
+
+# accidental curl files
+apps/runner/-H
+apps/runner/-d
+
+# local data folder
+data/
+
+# stray lockfile
+pnpm-lock 2.yaml

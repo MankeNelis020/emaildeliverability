@@ -1,3 +1,4 @@
+// packages/core/src/scoring/email.ts
 import { clampScore, statusFromScore, type ReadinessStatus } from "./status.js";
 
 export type SpfResult =
@@ -64,56 +65,121 @@ export interface EmailScoreResult {
   signals: EmailScoreSignals;
 }
 
-/**
- * Deterministic email readiness scoring v1.
- * - Start at 100
- * - Apply penalties per agreed rules
- * - Apply bonus (max +5)
- * - Clamp 0..100
- */
-export function scoreEmailReadiness(input: EmailScanInput): EmailScoreResult {
-  const checks = input.checks ?? {};
+// -------------------------
+// Helpers: Basic vs Verified
+// -------------------------
 
-  // --- DMARC penalties
+type AnyObj = Record<string, any>;
+
+function parseDmarcPolicyFromRecord(record: unknown): DmarcPolicy {
+  if (!record) return "unknown";
+  const s = String(record).toLowerCase();
+  const m = s.match(/\bp\s*=\s*(none|quarantine|reject)\b/);
+  if (!m) return "unknown";
+  const p = m[1];
+  if (p === "none" || p === "quarantine" || p === "reject") return p;
+  return "unknown";
+}
+
+function isVerifiedLike(input: AnyObj): boolean {
+  // Verified typically has these signals
+  const plan = String(
+    input?.inputs?.plan ??
+      input?.inputs?.sku ??
+      input?.inputs?.product ??
+      input?.plan ??
+      input?.sku ??
+      ""
+  ).toLowerCase();
+
+  if (plan.includes("verified")) return true;
+
+  if (input?.checks?.dkim) return true;
+  if (input?.email_scan?.checks?.dkim) return true;
+  if (input?.inbound_email || input?.email_evidence) return true;
+
+  return false;
+}
+
+/**
+ * Build canonical "checks":
+ * - Prefer input.checks
+ * - Else prefer input.email_scan.checks
+ * - Else synthesize from input.email_auth (Basic DNS results)
+ */
+function getChecks(input: AnyObj): NonNullable<EmailScanInput["checks"]> {
+  if (input?.checks) return input.checks;
+  if (input?.email_scan?.checks) return input.email_scan.checks;
+
+  // Basic scan: synthesize SPF + DMARC from email_auth
+  const emailAuth = input?.email_auth;
+  const spfPresent = emailAuth?.spf?.present === true;
+  const dmarcPresent = emailAuth?.dmarc?.present === true;
+
+  const dmarcPolicy = parseDmarcPolicyFromRecord(emailAuth?.dmarc?.record);
+
+  return {
+    spf: {
+      present: spfPresent,
+      result: "unknown",
+      alignment: "unknown",
+      dns_lookup_count: 0,
+    },
+    dmarc: {
+      present: dmarcPresent,
+      policy: dmarcPolicy,
+      pct: 100,
+      alignment_mode: "unknown",
+    },
+    // DKIM / transport / blacklists intentionally omitted in Basic (not measured)
+  };
+}
+
+/**
+ * Deterministic email readiness scoring v1 (robust for Basic + Verified).
+ *
+ * Rules:
+ * - Start 100
+ * - Penalize DMARC/SPF always when those are measured (Basic via email_auth synthesis)
+ * - Penalize DKIM/transport/blacklists ONLY when measured (Verified-like checks present)
+ */
+export function scoreEmailReadiness(input: EmailScanInput | AnyObj): EmailScoreResult {
+  const anyInput = input as AnyObj;
+  const checks = getChecks(anyInput);
+  const verified = isVerifiedLike(anyInput);
+
+  // -----------------
+  // DMARC penalties
+  // -----------------
   let dmarcPenalty = 0;
   const dmarc = checks.dmarc ?? {};
   const dmarcPresent = dmarc.present === true;
 
+  const dmarcPolicy: DmarcPolicy = (dmarc.policy ?? "unknown") as DmarcPolicy;
+
   if (!dmarcPresent) {
     dmarcPenalty += 30;
   } else {
-    const policy = dmarc.policy ?? "unknown";
-    if (policy === "none") dmarcPenalty += 20;
-    else if (policy === "quarantine") dmarcPenalty += 10;
+    if (dmarcPolicy === "none") dmarcPenalty += 20;
+    else if (dmarcPolicy === "quarantine") dmarcPenalty += 10;
     // reject => 0
     const pct = typeof dmarc.pct === "number" ? dmarc.pct : 100;
     if (pct < 100) dmarcPenalty += 5;
   }
 
-  // --- DKIM penalties
-  let dkimPenalty = 0;
-  const dkim = checks.dkim ?? {};
-  const dkimPresent = dkim.present === true;
-
-  if (!dkimPresent) {
-    dkimPenalty += 20;
-  } else {
-    const result = dkim.result ?? "unknown";
-    if (result === "fail") dkimPenalty += 20;
-    if ((dkim.alignment ?? "unknown") === "not_aligned") dkimPenalty += 10;
-  }
-
-  // --- SPF penalties
+  // -----------------
+  // SPF penalties
+  // -----------------
   let spfPenalty = 0;
   const spf = checks.spf ?? {};
   const spfPresent = spf.present === true;
+  const spfResult: SpfResult = (spf.result ?? "unknown") as SpfResult;
 
   if (!spfPresent) {
     spfPenalty += 15;
   } else {
-    const result = spf.result ?? "unknown";
-    if (result === "fail" || result === "permerror") spfPenalty += 15;
-    else if (result === "softfail" || result === "neutral") spfPenalty += 5;
+    if (spfResult === "fail" || spfResult === "permerror") spfPenalty += 15;
+    else if (spfResult === "softfail" || spfResult === "neutral") spfPenalty += 5;
 
     if ((spf.alignment ?? "unknown") === "not_aligned") spfPenalty += 5;
 
@@ -121,21 +187,54 @@ export function scoreEmailReadiness(input: EmailScanInput): EmailScoreResult {
     if (lookups > 10) spfPenalty += 5;
   }
 
-  // --- Transport penalties
+  // -----------------
+  // DKIM penalties (Verified-only)
+  // -----------------
+  let dkimPenalty = 0;
+  const dkimMeasured = verified && Boolean(checks.dkim);
+  const dkim = checks.dkim ?? {};
+  const dkimPresent = dkimMeasured && dkim.present === true;
+  const dkimResult = (dkim.result ?? "unknown") as "pass" | "fail" | "unknown";
+
+  if (dkimMeasured) {
+    if (!dkimPresent) {
+      dkimPenalty += 20;
+    } else {
+      if (dkimResult === "fail") dkimPenalty += 20;
+      if ((dkim.alignment ?? "unknown") === "not_aligned") dkimPenalty += 10;
+    }
+  }
+
+  // -----------------
+  // Transport penalties (only if measured)
+  // -----------------
   let transportPenalty = 0;
-  const mxTlsSupported = checks.mx?.tls?.supported;
-  if (mxTlsSupported === false) transportPenalty += 10;
 
-  const mtaStsPresent = checks.mta_sts?.present === true;
-  if (!mtaStsPresent) transportPenalty += 5;
+  const mxMeasured = verified && ("mx" in checks);
+  if (mxMeasured) {
+    const mxTlsSupported = checks.mx?.tls?.supported;
+    if (mxTlsSupported === false) transportPenalty += 10;
+  }
 
-  // --- Reputation penalties
+  const mtaStsMeasured = verified && ("mta_sts" in checks);
+  if (mtaStsMeasured) {
+    const mtaStsPresent = checks.mta_sts?.present === true;
+    if (!mtaStsPresent) transportPenalty += 5;
+  }
+
+  // -----------------
+  // Reputation penalties (only if measured)
+  // -----------------
   let reputationPenalty = 0;
-  const listed = checks.blacklists?.listed === true;
+  const blacklistsMeasured = verified && ("blacklists" in checks);
+  const listed = blacklistsMeasured && checks.blacklists?.listed === true;
   if (listed) reputationPenalty += 30;
 
-  // --- Bonus (cap +5)
+  // -----------------
+  // Bonus (cap +5)
+  // -----------------
   let bonus = 0;
+
   if ((dmarc.alignment_mode ?? "unknown") === "strict") bonus += 3;
 
   const selectors = dkim.selectors_checked ?? [];
@@ -147,23 +246,26 @@ export function scoreEmailReadiness(input: EmailScanInput): EmailScoreResult {
 
   if (bonus > 5) bonus = 5;
 
-  // --- Total score
+  // -----------------
+  // Total score
+  // -----------------
   const rawScore =
-    100 -
-    (dmarcPenalty + dkimPenalty + spfPenalty + transportPenalty + reputationPenalty) +
-    bonus;
+    100 - (dmarcPenalty + dkimPenalty + spfPenalty + transportPenalty + reputationPenalty) + bonus;
 
   const score = clampScore(rawScore);
   const status = statusFromScore(score);
 
+  // -----------------
   // Signals for campaign risk mapping
-  const dmarcPolicy = dmarc.policy ?? "unknown";
+  // -----------------
   const dmarcEnforced = dmarcPresent && (dmarcPolicy === "quarantine" || dmarcPolicy === "reject");
+
+  const dkimFailMeasured = dkimMeasured && dkimPresent && dkimResult === "fail";
 
   const authCritical =
     (!dmarcPresent || dmarcPolicy === "none") ||
-    (dkimPresent && (dkim.result ?? "unknown") === "fail") ||
-    (spfPresent && ((spf.result ?? "unknown") === "fail" || (spf.result ?? "unknown") === "permerror"));
+    (spfPresent && (spfResult === "fail" || spfResult === "permerror")) ||
+    dkimFailMeasured;
 
   const blacklisted = listed;
 
@@ -176,13 +278,12 @@ export function scoreEmailReadiness(input: EmailScanInput): EmailScoreResult {
       dkim: dkimPenalty,
       dmarc: dmarcPenalty,
       transport: transportPenalty,
-      reputation: reputationPenalty
+      reputation: reputationPenalty,
     },
     signals: {
       dmarc_enforced: dmarcEnforced,
       auth_critical: authCritical,
-      blacklisted
-    }
+      blacklisted,
+    },
   };
 }
-

@@ -6,15 +6,15 @@ import { randomUUID } from "node:crypto";
 import { URL, fileURLToPath } from "node:url";
 import fs from "node:fs";
 import path from "node:path";
-import { websiteHttp } from "@crs/scanners/src/websiteHttp";
-
+import { scanWebsiteHttp } from "@crs/scanners";
+import { scanEmailAuth } from "@crs/scanners";
 import Stripe from "stripe";
-import { htmlToPdf } from "./pdf";
+import { htmlToPdf } from "./pdf.js";
 
 
 // ✅ Gebruik scanStore zodat inbound later kan updaten
 import { createScanStore, generateReportV1 } from "@crs/core";
-
+import { renderReportHtml } from "./pdf/renderReportHtml.js";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: "2025-01-27.acacia" as any,
@@ -508,10 +508,11 @@ function handleOptions(res: import("node:http").ServerResponse) {
   res.end();
 }
 
+import { normalizeWebsiteUrl } from "@crs/scanners";
 
 // Create + persist scan (so inbound can patch later)
 function makeInitialScan(scanId: string, hostname: string, sending_email?: string, contact_email?: string) {
-  const website_url = hostname.startsWith("http") ? hostname : `https://${hostname}`;
+  const website_url = normalizeWebsiteUrl(hostname, { stripPath: true, stripQuery: true, stripHash: true });
   return {
     schema_version: "1.0",
     scan_id: scanId,
@@ -557,221 +558,355 @@ const server = createServer((req, res) => {
   }
 
 
-  // CREATE SCAN + PDF
-  if (req.method === "POST" && url.pathname === "/api/scan") {
-    let body = "";
-    req.on("data", (chunk) => (body += chunk));
-    req.on("end", async () => {
-      try {
-        const payload = JSON.parse(body || "{}") as {
-          hostname?: string;
-          sending_email?: string;
-          contact_email?: string;
-        };
+// CREATE SCAN + PDF
+if (req.method === "POST" && url.pathname === "/api/scan") {
+  let body = "";
+  req.on("data", (chunk) => (body += chunk));
 
 
-        if (!payload.hostname) {
-          sendJson(res, 400, { error: "hostname required" });
-          return;
-        }
+  req.on("end", async () => {
+    try {
+      const payload = JSON.parse(body || "{}") as {
+        hostname?: string;
+        sending_email?: string;
+        contact_email?: string;
+      };
 
 
-        const scanId = randomUUID();
-
-
-        // 1) save scan in store (source of truth)
-        const scan = makeInitialScan(scanId, payload.hostname, payload.sending_email, payload.contact_email);
-        store.save(scanId, scan);
-
-        // 1b) capture website evidence (3x no-cache + 3x cache)
-        const websiteEvidence = await websiteHttp({
-        url: scan.inputs.website_url,
-        runs: 3,
-        cache_runs: 3,
-        timeout_ms: 15000,
-        });
-
-
-        // 1c) persist evidence into the scan (so report can use it)
-        scan.website_scan = websiteEvidence;
-
-
-        // optional: keep timeline/debug
-        scan.meta = {
-       ...scan.meta,
-        runtime_ms: Date.now() - new Date(scan.created_at).getTime(),
-        };
-
-
-store.save(scanId, scan); // overwrite with evidence
-
-
-        // 2) generate report from scan
-        const report: StoredReport = {
-          ...generateReportV1(scan as any),
-          payment_status: "unpaid",
-          inputs: {
-            hostname: payload.hostname,
-            website_url: scan.inputs.website_url,
-            sending_email: scan.inputs.sending_email,
-            contact_email: scan.inputs.contact_email,
-          },
-        };
-
-
-        // also store a report json next to scan (handig)
-        try {
-          const reportPath = path.join(store.storeDir, `${scanId}.report.json`);
-          fs.writeFileSync(reportPath, JSON.stringify(report, null, 2), "utf-8");
-        } catch {}
-
-
-        reports.set(scanId, report);
-
-
-        // 3) PDF
-        const html = reportToHtml(report);
-        const pdfPath = pdfPathFor(scanId);
-        console.log("[CRS] writing pdf:", pdfPath);
-        await htmlToPdf(html, pdfPath);
-        console.log("[CRS] pdf written:", pdfPath, "exists:", fs.existsSync(pdfPath));
-
-
-        sendJson(res, 200, { scanId });
-      } catch (e: any) {
-        sendJson(res, 400, { error: "Invalid JSON", detail: String(e?.message ?? e) });
+      if (!payload.hostname) {
+        sendJson(res, 400, { error: "hostname required" });
+        return;
       }
-    });
-    return;
-  }
 
 
-  // DEV ONLY: mark scan as paid
-  if (req.method === "POST" && url.pathname.startsWith("/api/scan/") && url.pathname.endsWith("/mark-paid")) {
-    const scanId = url.pathname.replace("/api/scan/", "").replace("/mark-paid", "").trim();
-    if (!scanId) {
-      sendJson(res, 400, { error: "scanId missing" });
-      return;
-    }
+      const scanId = randomUUID();
 
 
-    // update cached report if exists
-    const r = reports.get(scanId);
-    if (r) {
-      r.payment_status = "paid";
-      reports.set(scanId, r);
-    }
+      // 1) save scan in store (source of truth)
+      const scan = makeInitialScan(
+        scanId,
+        payload.hostname,
+        payload.sending_email,
+        payload.contact_email
+      );
+      store.save(scanId, scan);
+
+      // 1a) EMAIL AUTH (SPF + DMARC) — hoort bij Basic scan
+try {
+  const emailAuth = await scanEmailAuth(payload.hostname);
+  (scan as any).email_auth = emailAuth;
+} catch (e) {
+  console.warn("[CRS] email auth scan failed:", String((e as any)?.message ?? e));
+  (scan as any).email_auth = null;
+}
 
 
-    sendJson(res, 200, { ok: true, scanId, payment_status: "paid" });
-    return;
-  }
+// persist scan update
+store.save(scanId, scan);
 
 
-  // CREATE STRIPE CHECKOUT SESSION
-  if (req.method === "POST" && url.pathname === "/api/checkout/create-session") {
-    let body = "";
-    req.on("data", (chunk) => (body += chunk));
-    req.on("end", async () => {
+      console.log("[CRS] website scan starting:", scan.inputs.website_url);
+
+      // 1b) capture website evidence (optional)
       try {
-        const { sku, scanId } = JSON.parse(body || "{}") as { sku?: "basic" | "verified"; scanId?: string };
-        if (!sku || (sku !== "basic" && sku !== "verified")) {
-          sendJson(res, 400, { error: "sku must be 'basic' or 'verified'" });
-          return;
-        }
-
-
-        const priceId = sku === "verified" ? process.env.STRIPE_PRICE_VERIFIED : process.env.STRIPE_PRICE_BASIC;
-        if (!priceId) {
-          sendJson(res, 500, { error: "Price not configured" });
-          return;
-        }
-        if (!process.env.APP_URL) {
-          sendJson(res, 500, { error: "APP_URL not configured" });
-          return;
-        }
-
-
-        const purchaseId = randomUUID();
-
-
-        const session = await stripe.checkout.sessions.create({
-          mode: "payment",
-          line_items: [{ price: priceId, quantity: 1 }],
-          success_url: `${process.env.APP_URL}/checkout/success?purchaseId=${purchaseId}&session_id={CHECKOUT_SESSION_ID}`,
-          cancel_url: `${process.env.APP_URL}/checkout/cancel?purchaseId=${purchaseId}`,
-          metadata: { purchaseId, sku, scanId: scanId ?? "" },
+        const websiteEvidence = await scanWebsiteHttp(scan.inputs.website_url, {
+          noCacheSamples: 3,
+          cacheSamples: 3,
         });
+        
+        console.log(
+          "[CRS] websiteEvidence samples:",
+          websiteEvidence?.aggregates?.http?.samples?.length,
+          "summary:",
+          !!websiteEvidence?.aggregates?.http?.summary
+        );
+        
+       
 
+        
 
-        sendJson(res, 200, { url: session.url, purchaseId });
+        (scan as any).website_scan = websiteEvidence;
       } catch (e) {
-        sendJson(res, 400, { error: "Invalid request body", detail: String(e) });
+        console.log("[CRS] website scan failed:", String((e as any)?.message ?? e));
+        // website evidence is optional → we continue
       }
-    });
+      
+
+      // optional: keep timeline/debug
+      scan.meta = {
+        ...scan.meta,
+        runtime_ms: Date.now() - new Date(scan.created_at).getTime(),
+      };
+
+
+      // persist updated scan (with or without website evidence)
+      store.save(scanId, scan);
+
+
+// 2) generate report from scan
+const report: StoredReport = {
+  ...generateReportV1({
+    ...scan,
+    // 🔑 belangrijk: maak inputs compleet (plan/sku behouden) + jouw payload velden toevoegen
+    inputs: {
+      ...(scan as any).inputs,
+
+      // 👇 jouw bestaande velden
+      hostname: payload.hostname,
+      website_url: (scan as any).inputs?.website_url,
+      sending_email: (scan as any).inputs?.sending_email,
+      contact_email: (scan as any).inputs?.contact_email,
+
+      // ✅ expliciet plan/sku borgen (Basic default)
+      plan:
+        (scan as any).inputs?.plan ??
+        (payload as any)?.plan ??
+        (payload as any)?.sku ??
+        "basic",
+    },
+  } as any),
+
+  payment_status: "unpaid",
+
+  // ✅ laat report.inputs staan (voor PDF/client inputs),
+  // maar OVERSCHRIJF NIET meer de hele inputs zonder merge
+  inputs: {
+    ...(scan as any).inputs,
+    hostname: payload.hostname,
+    website_url: (scan as any).inputs?.website_url,
+    sending_email: (scan as any).inputs?.sending_email,
+    contact_email: (scan as any).inputs?.contact_email,
+    plan:
+      (scan as any).inputs?.plan ??
+      (payload as any)?.plan ??
+      (payload as any)?.sku ??
+      "basic",
+  },
+};
+
+
+      // expose evidence in report JSON (handig voor debug en PDF)
+(report as any).email_auth = (scan as any).email_auth ?? null;
+
+
+      // ✅ ensure website evidence is available in the rendered report + /api/scan/:id JSON
+(report as any).website_scan = (scan as any).website_scan
+
+
+      // also store a report json next to scan (handig, maar niet kritisch)
+      try {
+        const reportPath = path.join(store.storeDir, `${scanId}.report.json`);
+        fs.writeFileSync(reportPath, JSON.stringify(report, null, 2), "utf-8");
+      } catch (err) {
+        console.warn("[CRS] failed to write report.json", scanId, String(err));
+      }
+
+
+      // cache report in memory
+      reports.set(scanId, report);
+
+
+      // 3) PDF (core step)
+      const html = renderReportHtml(report);
+      const pdfPath = pdfPathFor(scanId);
+
+
+      console.log("[CRS] writing pdf:", pdfPath);
+      await htmlToPdf(html, pdfPath);
+
+
+      const exists = fs.existsSync(pdfPath);
+      console.log("[CRS] pdf written:", pdfPath, "exists:", exists);
+
+
+      if (!exists) {
+        throw new Error(`PDF generation reported success but file missing: ${pdfPath}`);
+      }
+
+
+      sendJson(res, 200, { scanId });
+    } catch (e: any) {
+      sendJson(res, 400, {
+        error: "Scan failed",
+        detail: String(e?.message ?? e),
+      });
+    }
+  });
+
+
+  return;
+}
+
+
+// DEV ONLY: mark scan as paid
+if (
+  req.method === "POST" &&
+  url.pathname.startsWith("/api/scan/") &&
+  url.pathname.endsWith("/mark-paid")
+) {
+  const scanId = url.pathname.replace("/api/scan/", "").replace("/mark-paid", "").trim();
+  if (!scanId) {
+    sendJson(res, 400, { error: "scanId missing" });
     return;
   }
 
 
-  // PDF gate (payment required)
-  if (req.method === "GET" && url.pathname.startsWith("/api/scan/") && url.pathname.endsWith("/report.pdf")) {
-    const scanId = url.pathname.replace("/api/scan/", "").replace("/report.pdf", "").trim();
-    if (!scanId) {
-      sendJson(res, 400, { error: "scanId missing" });
-      return;
-    }
-
-
-    const report = reports.get(scanId);
-    if (!report) {
-      sendJson(res, 404, { error: "Report not found", scanId });
-      return;
-    }
-
-
-    if (report.payment_status !== "paid") {
-      sendJson(res, 402, { error: "Payment required", scanId });
-      return;
-    }
-
-
-    const p = pdfPathFor(scanId);
-    if (!fs.existsSync(p)) {
-      sendJson(res, 404, { error: "PDF not found", scanId });
-      return;
-    }
-
-
-    res.writeHead(200, {
-      "Content-Type": "application/pdf",
-      "Content-Disposition": `inline; filename="${scanId}.report.pdf"`,
-      "Access-Control-Allow-Origin": "http://localhost:5173",
-    });
-
-
-    fs.createReadStream(p).pipe(res);
+  const r = reports.get(scanId);
+  if (!r) {
+    sendJson(res, 404, { error: "Report not found", scanId });
     return;
   }
 
 
-  // JSON report
-  if (req.method === "GET" && url.pathname.startsWith("/api/scan/")) {
-    const scanId = url.pathname.replace("/api/scan/", "").trim();
-    const report = reports.get(scanId);
-    if (!report) {
-      sendJson(res, 404, { error: "Report not found", scanId });
-      return;
+  r.payment_status = "paid";
+  reports.set(scanId, r);
+
+
+  sendJson(res, 200, { ok: true, scanId, payment_status: "paid" });
+  return;
+}
+
+
+// CREATE STRIPE CHECKOUT SESSION
+if (req.method === "POST" && url.pathname === "/api/checkout/create-session") {
+  let body = "";
+  req.on("data", (chunk) => (body += chunk));
+
+
+  req.on("end", async () => {
+    try {
+      const parsed = JSON.parse(body || "{}") as {
+        sku?: "basic" | "verified";
+        scanId?: string;
+      };
+
+
+      const sku = parsed.sku;
+      const scanId = parsed.scanId;
+
+
+      if (!sku || (sku !== "basic" && sku !== "verified")) {
+        sendJson(res, 400, { error: "sku must be 'basic' or 'verified'" });
+        return;
+      }
+
+
+      const priceId =
+        sku === "verified" ? process.env.STRIPE_PRICE_VERIFIED : process.env.STRIPE_PRICE_BASIC;
+
+
+      if (!priceId) {
+        sendJson(res, 500, { error: "Price not configured" });
+        return;
+      }
+      if (!process.env.APP_URL) {
+        sendJson(res, 500, { error: "APP_URL not configured" });
+        return;
+      }
+
+
+      const purchaseId = randomUUID();
+
+
+      const session = await stripe.checkout.sessions.create({
+        mode: "payment",
+        line_items: [{ price: priceId, quantity: 1 }],
+        success_url: `${process.env.APP_URL}/checkout/success?purchaseId=${purchaseId}&session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${process.env.APP_URL}/checkout/cancel?purchaseId=${purchaseId}`,
+        metadata: { purchaseId, sku, scanId: scanId ?? "" },
+      });
+
+
+      sendJson(res, 200, { url: session.url, purchaseId });
+    } catch (e) {
+      sendJson(res, 400, { error: "Invalid request body", detail: String(e) });
     }
-    sendJson(res, 200, report);
+  });
+
+
+  return;
+}
+
+
+// PDF gate (payment required)
+if (
+  req.method === "GET" &&
+  url.pathname.startsWith("/api/scan/") &&
+  url.pathname.endsWith("/report.pdf")
+) {
+  const scanId = url.pathname.replace("/api/scan/", "").replace("/report.pdf", "").trim();
+
+
+  if (!scanId) {
+    sendJson(res, 400, { error: "scanId missing" });
     return;
   }
 
 
-  sendJson(res, 404, { error: "Not found" });
-});
+  const report = reports.get(scanId);
+  if (!report) {
+    sendJson(res, 404, { error: "Report not found", scanId });
+    return;
+  }
+
+
+  if (report.payment_status !== "paid") {
+    sendJson(res, 402, { error: "Payment required", scanId });
+    return;
+  }
+
+
+  const p = pdfPathFor(scanId);
+  if (!fs.existsSync(p)) {
+    sendJson(res, 404, { error: "PDF not found", scanId });
+    return;
+  }
+
+  if (!fs.existsSync(p)) {
+    sendJson(res, 202, { status: "processing", scanId });
+    return;
+  }
+
+
+  res.writeHead(200, {
+    "Content-Type": "application/pdf",
+    "Content-Disposition": `inline; filename="${scanId}.report.pdf"`,
+    "Access-Control-Allow-Origin": "http://localhost:5173",
+  });
+
+
+  fs.createReadStream(p).pipe(res);
+  return;
+}
+
+
+// JSON report
+if (req.method === "GET" && url.pathname.startsWith("/api/scan/")) {
+  const scanId = url.pathname.replace("/api/scan/", "").trim();
+
+
+  if (!scanId) {
+    sendJson(res, 400, { error: "scanId missing" });
+    return;
+  }
+  
+  const report = reports.get(scanId);
+  if (!report) {
+    sendJson(res, 404, { error: "Report not found", scanId });
+    return;
+  }
+
+
+  sendJson(res, 200, report);
+  return;
+}
+
+
+// fallback
+sendJson(res, 404, { error: "Not found" });
+}); // <-- sluit createServer callback netjes af
 
 
 server.listen(8787, () => {
   console.log("Runner API listening on http://localhost:8787");
-  console.log("[CRS] store dir:", STORE_DIR);
 });
