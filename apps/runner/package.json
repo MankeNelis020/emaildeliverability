@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@crs/core": "workspace:*",
+    "@crs/scanners": "workspace:*",
     "dotenv": "^17.2.3",
     "playwright": "^1.57.0",
     "stripe": "^20.2.0"

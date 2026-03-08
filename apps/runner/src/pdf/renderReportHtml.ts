@@ -3,7 +3,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-
 // sections
 import { renderCoverSection } from "./sections/cover.js";
 import { renderTocSection } from "./sections/toc.js";
@@ -15,7 +14,6 @@ import { renderWebsiteResultsSection } from "./sections/websiteResults.js";
 import { renderEmailResultsSection } from "./sections/emailResults.js";
 import { renderConclusionsSection } from "./sections/conclusions.js";
 import { renderFooterSection } from "./sections/footer.js";
-
 
 type AnyReport = Record<string, any>;
 
