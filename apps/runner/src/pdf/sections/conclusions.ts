@@ -1,4 +1,4 @@
-import { buildRecommendations } from "@crs/core/src/report/recommendations.js";
+import { buildRecommendations } from "@crs/core";
 export function renderConclusionsSection(report: any): string {
   const actions = buildRecommendations(report)
 

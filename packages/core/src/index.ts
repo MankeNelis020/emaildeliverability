@@ -1,6 +1,6 @@
 // packages/core/src/index.ts
 export * from "./types/scan.js";
-
+export * from "./report/recommendations.js"
 
 export * from "./scoring/index.js";
 export * from "./report/generateReportV1.js";
