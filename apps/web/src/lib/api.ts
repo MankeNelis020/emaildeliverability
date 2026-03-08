@@ -10,7 +10,7 @@ export type ScanReport = {
   warnings?: Array<{ id: string; message: string }>;
 };
 
-const baseURL = "http://localhost:8787";
+const baseURL = "https://sendshield.nl";
 const timeoutMs = 15000;
 
 async function fetchWithTimeout(input: RequestInfo, init?: RequestInit) {
