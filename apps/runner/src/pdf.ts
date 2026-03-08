@@ -12,7 +12,19 @@ export async function htmlToPdf(html: string, outPath: string): Promise<void> {
   try {
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: "load" });
-    await page.pdf({ path: outPath, format: "A4", printBackground: true });
+    await page.emulateMedia({ media: "print" });
+
+await page.pdf({
+  path: outPath,
+  format: "A4",
+  printBackground: true,
+  margin: {
+    top: "12mm",
+    right: "12mm",
+    bottom: "14mm",
+    left: "12mm"
+  }
+});
   } finally {
     await browser.close();
   }

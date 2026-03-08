@@ -9,6 +9,7 @@ export type ActionId =
   | "spf_add"
   | "spf_fix"
   | "blacklist_cleanup"
+  | "redirect_cleanup"
   | "reduce_lcp"
   | "reduce_ttfb"
   | "stabilize_send_window"
@@ -109,9 +110,21 @@ export const ACTIONS: Record<ActionId, ActionCopy> = {
       "Request delisting only after remediation and monitoring."
     ]
   },
+  redirect_cleanup: {
+    id: "redirect_cleanup",
+    title: "Remove redirect chains from campaign landing URLs",
+    why: "Redirect chains slow down landing page loads and increase the chance of user drop-off during campaigns.",
+    impact: "medium",
+    effort: "low",
+    steps: [
+      "Update campaign links to point directly to the final landing page.",
+      "Remove intermediate redirects in marketing tracking links.",
+      "Ensure the first request returns status 200 instead of multiple 30x redirects."
+    ]
+  },
   reduce_lcp: {
     id: "reduce_lcp",
-    title: "Improve mobile LCP (largest contentful paint)",
+    title: "Optimize above-the-fold content to reduce mobile load time",
     why: "Slow mobile LCP reduces conversion and amplifies the impact of a campaign spike.",
     impact: "high",
     effort: "medium",
@@ -123,14 +136,14 @@ export const ACTIONS: Record<ActionId, ActionCopy> = {
   },
   reduce_ttfb: {
     id: "reduce_ttfb",
-    title: "Reduce TTFB (server response time)",
+    title: "Enable server-side caching or improve origin response time",
     why: "High TTFB means your origin can’t respond fast enough—campaign traffic will amplify the issue.",
     impact: "high",
     effort: "medium",
     steps: [
-      "Enable full-page caching where possible and verify consistent cache hits.",
-      "Reduce redirects and expensive origin work (DB queries, heavy middleware).",
-      "Use CDN + keep origin close to users and properly sized."
+      "Enable full-page caching or CDN caching for landing pages.",
+      "Remove unnecessary redirects or middleware that slow origin responses.",
+      "Upgrade hosting resources or move the origin closer to the audience if latency is high."
     ]
   },
   stabilize_send_window: {
@@ -159,16 +172,16 @@ export const ACTIONS: Record<ActionId, ActionCopy> = {
   },
   cache_consistency: {
     id: "cache_consistency",
-    title: "Fix cache inconsistency",
-    why: "Inconsistent cache hits create unpredictable performance—especially under campaign load.",
-    impact: "medium",
+    title: "Enable CDN caching and verify repeat requests return cache HIT",
+    why: "A cache hit rate near 0% means every campaign visitor hits the origin server directly, which risks slowdowns or outages during send spikes.",
+    impact: "high",
     effort: "low",
     steps: [
-      "Confirm CDN/page cache is enabled for landing pages.",
-      "Fix cache keys (cookies/headers) that prevent caching.",
-      "Verify hit ratio across geos and during peak."
+      "Enable CDN caching for static assets and landing pages.",
+      "Check cache-control headers and remove cookies that prevent caching.",
+      "Confirm repeated requests return cache HIT across multiple locations."
     ]
-  }
+  },
 };
 
 export function headlineFor(verdict: "low" | "medium" | "high", email: number, web: number): string {

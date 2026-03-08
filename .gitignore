@@ -15,7 +15,6 @@ apps/runner/out.report.json
 report.pdf
 apps/runner/*.pdf
 apps/runner/artifacts/
-apps/runner/src/pdf/
 
 # accidental curl files
 apps/runner/-H

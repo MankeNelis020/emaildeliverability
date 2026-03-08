@@ -10,7 +10,8 @@
   --text: #f8fafc;
   --muted: #a1a9bb;
   --border: rgba(255, 255, 255, 0.08);
-  --brand: #7c5cff;
+  --brand: #7c5cff;--brand-dark: #6a4cff;
+
 }
 
 body {
