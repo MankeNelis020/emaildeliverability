@@ -32,6 +32,9 @@ importers:
       '@crs/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@crs/scanners':
+        specifier: workspace:*
+        version: link:../../packages/scanners
       dotenv:
         specifier: ^17.2.3
         version: 17.2.3
