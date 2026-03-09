@@ -26,7 +26,7 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
 console.log("Stripe key loaded:", !!process.env.STRIPE_SECRET_KEY);
 
 
-type PaymentStatus = "unpaid" | "paid";
+type PaymentStatus = "unpaid" | "paid" | "freebeta";
 
 
 type Blocker = { id: string; message: string; severity?: "hard" | "soft" };
@@ -760,7 +760,7 @@ if (
   }
 
 
-  r.payment_status = "paid";
+  r.payment_status = "paid","freebeta";
   reports.set(scanId, r);
 
 
@@ -863,7 +863,7 @@ if (
   }
 
 
-  if (report.payment_status !== "paid") {
+  if (report.payment_status !== "paid" && report.access_mode !== "freebeta") {
     sendJson(res, 402, { error: "Payment required", scanId });
     return;
   }
