@@ -11,7 +11,7 @@ export type ScanReport = {
 };
 
 const API_BASE =
-  import.meta.env.VITE_API_BASE_URL || "http://localhost:8787";
+  import.meta.env.VITE_API_BASE_URL // "http://localhost:8787";
 const timeoutMs = 15000;
 
 async function fetchWithTimeout(input: RequestInfo, init?: RequestInit) {

@@ -491,7 +491,7 @@ ${renderWebsiteEvidence(report)}
 function sendJson(res: import("node:http").ServerResponse, status: number, payload: unknown) {
   res.writeHead(status, {
     "Content-Type": "application/json",
-    "Access-Control-Allow-Origin": "http://localhost:5173",
+    "Access-Control-Allow-Origin": "https://www.sendshiel.nl",
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
   });
@@ -501,7 +501,7 @@ function sendJson(res: import("node:http").ServerResponse, status: number, paylo
 
 function handleOptions(res: import("node:http").ServerResponse) {
   res.writeHead(204, {
-    "Access-Control-Allow-Origin": "http://localhost:5173",
+    "Access-Control-Allow-Origin": "https://www.sendshiel.nl",
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
   });
