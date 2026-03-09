@@ -774,40 +774,49 @@ if (req.method === "POST" && url.pathname === "/api/checkout/create-session") {
 
 
   req.on("end", async () => {
+    let parsed: { sku?: "basic" | "verified"; scanId?: string };
+  
+  
     try {
-      const parsed = JSON.parse(body || "{}") as {
-        sku?: "basic" | "verified";
-        scanId?: string;
-      };
-
-
+      parsed = JSON.parse(body || "{}");
+    } catch (e) {
+      sendJson(res, 400, { error: "Invalid JSON body", detail: String(e) });
+      return;
+    }
+  
+  
+    try {
       const sku = parsed.sku;
       const scanId = parsed.scanId;
-
-
+  
+  
       if (!sku || (sku !== "basic" && sku !== "verified")) {
         sendJson(res, 400, { error: "sku must be 'basic' or 'verified'" });
         return;
       }
-
-
+  
+  
       const priceId =
-        sku === "verified" ? process.env.STRIPE_PRICE_VERIFIED : process.env.STRIPE_PRICE_BASIC;
-
-
+        sku === "verified"
+          ? process.env.STRIPE_PRICE_VERIFIED
+          : process.env.STRIPE_PRICE_BASIC;
+  
+  
       if (!priceId) {
         sendJson(res, 500, { error: "Price not configured" });
         return;
       }
+  
+  
       if (!process.env.APP_URL) {
         sendJson(res, 500, { error: "APP_URL not configured" });
         return;
       }
-
-
+  
+  
       const purchaseId = randomUUID();
-
-
+  
+  
       const session = await stripe.checkout.sessions.create({
         mode: "payment",
         line_items: [{ price: priceId, quantity: 1 }],
@@ -815,15 +824,17 @@ if (req.method === "POST" && url.pathname === "/api/checkout/create-session") {
         cancel_url: `${process.env.APP_URL}/checkout/cancel?purchaseId=${purchaseId}`,
         metadata: { purchaseId, sku, scanId: scanId ?? "" },
       });
-
-
+  
+  
       sendJson(res, 200, { url: session.url, purchaseId });
     } catch (e) {
-      sendJson(res, 400, { error: "Invalid request body", detail: String(e) });
+      sendJson(res, 500, {
+        error: "Failed to create Stripe checkout session",
+        detail: e instanceof Error ? e.message : String(e),
+      });
     }
   });
-
-
+  
   return;
 }
 
