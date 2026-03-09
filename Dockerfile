@@ -16,7 +16,7 @@ COPY apps ./apps
 COPY packages ./packages
 
 
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile --prod=false
 RUN pnpm -r build
 
 
