@@ -921,6 +921,178 @@ if (req.method === "GET" && url.pathname.startsWith("/api/scan/")) {
   return;
 }
 
+if (req.method === "POST" && url.pathname === "/api/checkout/complete") {
+  let body = "";
+  req.on("data", (chunk) => (body += chunk));
+
+
+  req.on("end", async () => {
+    try {
+      const payload = JSON.parse(body || "{}") as {
+        purchaseId?: string;
+        hostname?: string;
+        sending_email?: string;
+        contact_email?: string;
+      };
+
+
+      if (!payload.purchaseId) {
+        sendJson(res, 400, { error: "purchaseId required" });
+        return;
+      }
+
+
+      if (!payload.hostname) {
+        sendJson(res, 400, { error: "hostname required" });
+        return;
+      }
+
+
+      const purchase = getPurchase(payload.purchaseId);
+      if (!purchase) {
+        sendJson(res, 404, { error: "Purchase not found" });
+        return;
+      }
+
+
+      if (!purchase.stripe_session_id) {
+        sendJson(res, 400, { error: "Stripe session missing for purchase" });
+        return;
+      }
+
+
+      const session = await stripe.checkout.sessions.retrieve(purchase.stripe_session_id);
+
+
+      if (session.payment_status !== "paid") {
+        sendJson(res, 402, { error: "Payment not completed" });
+        return;
+      }
+
+
+      updatePurchase(payload.purchaseId, { status: "paid" });
+
+
+      const scanId = randomUUID();
+
+
+      const scan = makeInitialScan(
+        scanId,
+        payload.hostname,
+        payload.sending_email,
+        payload.contact_email
+      );
+
+
+      store.save(scanId, scan);
+
+
+      try {
+        const emailAuth = await scanEmailAuth(payload.hostname);
+        (scan as any).email_auth = emailAuth;
+      } catch (e) {
+        console.warn("[CRS] email auth scan failed:", String((e as any)?.message ?? e));
+        (scan as any).email_auth = null;
+      }
+
+
+      store.save(scanId, scan);
+
+
+      try {
+        const websiteEvidence = await scanWebsiteHttp(scan.inputs.website_url, {
+          noCacheSamples: 3,
+          cacheSamples: 3,
+        });
+        (scan as any).website_scan = websiteEvidence;
+      } catch (e) {
+        console.log("[CRS] website scan failed:", String((e as any)?.message ?? e));
+      }
+
+
+      scan.meta = {
+        ...scan.meta,
+        runtime_ms: Date.now() - new Date(scan.created_at).getTime(),
+      };
+
+
+      store.save(scanId, scan);
+
+
+      const report: StoredReport = {
+        ...generateReportV1({
+          ...scan,
+          inputs: {
+            ...(scan as any).inputs,
+            hostname: payload.hostname,
+            website_url: (scan as any).inputs?.website_url,
+            sending_email: payload.sending_email ?? "",
+            contact_email: payload.contact_email ?? "",
+            plan: purchase.sku,
+          },
+        } as any),
+
+
+        payment_status: "paid",
+        purchase_id: payload.purchaseId,
+        stripe_session_id: purchase.stripe_session_id,
+
+
+        inputs: {
+          ...(scan as any).inputs,
+          hostname: payload.hostname,
+          website_url: (scan as any).inputs?.website_url,
+          sending_email: payload.sending_email ?? "",
+          contact_email: payload.contact_email ?? "",
+          plan: purchase.sku,
+        },
+      };
+
+
+      (report as any).email_auth = (scan as any).email_auth ?? null;
+      (report as any).website_scan = (scan as any).website_scan ?? null;
+
+
+      try {
+        const reportPath = path.join(store.storeDir, `${scanId}.report.json`);
+        fs.writeFileSync(reportPath, JSON.stringify(report, null, 2), "utf-8");
+      } catch (err) {
+        console.warn("[CRS] failed to write report.json", scanId, String(err));
+      }
+
+
+      reports.set(scanId, report);
+
+
+      const html = renderReportHtml(report);
+      const pdfPath = pdfPathFor(scanId);
+
+
+      console.log("[CRS] writing pdf:", pdfPath);
+      await htmlToPdf(html, pdfPath);
+
+
+      const exists = fs.existsSync(pdfPath);
+      console.log("[CRS] pdf written:", pdfPath, "exists:", exists);
+
+
+      if (!exists) {
+        throw new Error(`PDF generation reported success but file missing: ${pdfPath}`);
+      }
+
+
+      sendJson(res, 200, { scanId });
+    } catch (e) {
+      sendJson(res, 500, {
+        error: "Failed to complete checkout and start scan",
+        detail: e instanceof Error ? e.message : String(e),
+      });
+    }
+  });
+
+
+  return;
+}
 
 // fallback
 sendJson(res, 404, { error: "Not found" });

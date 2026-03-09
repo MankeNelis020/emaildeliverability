@@ -89,3 +89,31 @@ export async function createCheckoutSession(sku: "basic" | "verified") {
 
   return data as { url: string; purchaseId: string };
 }
+
+export async function completeCheckoutAndStartScan(params: {
+  purchaseId: string;
+  hostname: string;
+  sending_email?: string;
+  contact_email?: string;
+}): Promise<{ scanId: string }> {
+  const response = await fetchWithTimeout(`${API_BASE}/api/checkout/complete`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+
+
+  const data = await response.json().catch(() => ({}));
+
+
+  if (!response.ok) {
+    throw new Error(
+      (data as any)?.error ||
+      (data as any)?.detail ||
+      `Failed to complete checkout (${response.status})`
+    );
+  }
+
+
+  return data as { scanId: string };
+}
