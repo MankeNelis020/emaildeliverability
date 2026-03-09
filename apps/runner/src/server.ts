@@ -548,8 +548,8 @@ const server = createServer((req, res) => {
   }
 
 
-  const url = new URL(req.url, "http://localhost:8787");
-
+  const APP_URL = process.env.APP_URL; // http://localhost:8787
+  const url = new URL (req.url, APP_URL)
 
   // HEALTH
   if (req.method === "GET" && url.pathname === "/health") {
@@ -907,6 +907,8 @@ sendJson(res, 404, { error: "Not found" });
 }); // <-- sluit createServer callback netjes af
 
 
-server.listen(8787, () => {
-  console.log("Runner API listening on http://localhost:8787");
+const PORT = Number(process.env.PORT || 8787);
+
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`Runner API listening on port ${PORT}`);
 });

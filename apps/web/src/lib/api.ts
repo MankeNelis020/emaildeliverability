@@ -10,7 +10,8 @@ export type ScanReport = {
   warnings?: Array<{ id: string; message: string }>;
 };
 
-const baseURL = "https://sendshield.nl";
+const API_BASE =
+  import.meta.env.VITE_API_BASE_URL || "http://localhost:8787";
 const timeoutMs = 15000;
 
 async function fetchWithTimeout(input: RequestInfo, init?: RequestInit) {
@@ -26,7 +27,7 @@ async function fetchWithTimeout(input: RequestInfo, init?: RequestInit) {
 
 export async function startScan(hostname: string): Promise<{ scanId: string }> {
   try {
-    const response = await fetchWithTimeout(`${baseURL}/api/scan`, {
+    const response = await fetchWithTimeout(`${API_BASE}/api/scan`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -49,7 +50,7 @@ export async function startScan(hostname: string): Promise<{ scanId: string }> {
 
 export async function getScan(scanId: string): Promise<ScanReport> {
   try {
-    const response = await fetchWithTimeout(`${baseURL}/api/scan/${scanId}`);
+    const response = await fetchWithTimeout(`${API_BASE}/api/scan/${scanId}`);
     if (!response.ok) {
       throw new Error("Scan not found");
     }
@@ -63,7 +64,7 @@ export async function getScan(scanId: string): Promise<ScanReport> {
 }
 
 export async function createCheckoutSession(sku: "basic" | "verified") {
-  const response = await fetchWithTimeout(`${baseURL}/api/checkout/create-session`, {
+  const response = await fetchWithTimeout(`${API_BASE}/api/checkout/create-session`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ sku }),
