@@ -760,7 +760,7 @@ if (
   }
 
 
-  r.payment_status = "paid","freebeta";
+  r.payment_status = "paid";
   reports.set(scanId, r);
 
 
@@ -863,7 +863,7 @@ if (
   }
 
 
-  if (report.payment_status !== "paid" && report.access_mode !== "freebeta") {
+  if (report.payment_status !== "paid" && report.payment_status !== "freebeta") {
     sendJson(res, 402, { error: "Payment required", scanId });
     return;
   }
