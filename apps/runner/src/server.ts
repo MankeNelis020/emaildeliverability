@@ -1,7 +1,7 @@
 // server.ts
 
 import "dotenv/config";
-
+import { createPurchase, getPurchase, updatePurchase } from "./purchaseStore.js";
 
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
@@ -817,8 +817,15 @@ if (req.method === "POST" && url.pathname === "/api/checkout/create-session") {
   
   
       const purchaseId = randomUUID();
-  
-  
+
+      // purchase opslaan (pending)
+      createPurchase({
+        purchaseId,
+        sku,
+        status: "pending",
+        created_at: new Date().toISOString(),
+      });
+      
       const session = await stripe.checkout.sessions.create({
         mode: "payment",
         line_items: [{ price: priceId, quantity: 1 }],
