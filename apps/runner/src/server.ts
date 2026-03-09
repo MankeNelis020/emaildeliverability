@@ -1,3 +1,5 @@
+// server.ts
+
 import "dotenv/config";
 
 
@@ -882,7 +884,7 @@ if (
   res.writeHead(200, {
     "Content-Type": "application/pdf",
     "Content-Disposition": `inline; filename="${scanId}.report.pdf"`,
-    "Access-Control-Allow-Origin": "http://localhost:5173",
+    "Access-Control-Allow-Origin": "https://www.sendshield.nl",
   });
 
 

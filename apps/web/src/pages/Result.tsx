@@ -83,14 +83,28 @@ export default function Result() {
               ) : null}
             </div>
           ) : null}
-          <div className="flex flex-wrap gap-3">
-            <Link to="/scan" className="btnPrimary">
-              Run again
-            </Link>
-            <a href="/#pricing" className="btnSecondary">
-              Back to pricing
-            </a>
-          </div>
+<div className="flex flex-wrap gap-3">
+
+{scanId && (
+  <a
+    href={`https://api.sendshield.nl/api/scan/${scanId}/report.pdf`}
+    target="_blank"
+    rel="noopener noreferrer"
+    className="btnPrimary"
+  >
+    Download PDF
+  </a>
+)}
+
+<Link to="/scan" className="btnPrimary">
+  Run again
+</Link>
+
+<a href="/#pricing" className="btnSecondary">
+  Back to pricing
+</a>
+
+</div>
         </div>
       </div>
     </main>
