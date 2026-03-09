@@ -11,13 +11,16 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 RUN corepack enable
 
 
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY apps ./apps
 COPY packages ./packages
 
 
 RUN pnpm install --frozen-lockfile --prod=false
-RUN pnpm -r build
+RUN pnpm --filter @crs/core build
+RUN pnpm --filter @crs/scanners build
+RUN pnpm --filter @crs/runner build
+
 
 
 EXPOSE 8080
