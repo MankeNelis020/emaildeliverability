@@ -918,25 +918,41 @@ if (
 ) {
   const scanId = url.pathname.replace("/api/scan/", "").replace("/report.pdf", "").trim();
 
-
   if (!scanId) {
     sendJson(req, res, 400, { error: "scanId missing" });
     return;
   }
 
+  // Try memory first, then disk (survives server restarts)
+  let report = reports.get(scanId) ?? null;
+  if (!report) {
+    const reportPath = path.join(store.storeDir, `${scanId}.report.json`);
+    if (fs.existsSync(reportPath)) {
+      try {
+        report = JSON.parse(fs.readFileSync(reportPath, "utf-8")) as StoredReport;
+        reports.set(scanId, report);
+      } catch {
+        // corrupt file — fall through to 404
+      }
+    }
+  }
 
-  const report = reports.get(scanId);
   if (!report) {
     sendJson(req, res, 404, { error: "Report not found", scanId });
     return;
   }
 
+  // Backward compat: scans created before the freebeta fix have payment_status "unpaid"
+  // but no purchase_id — they are direct/FREEBETA scans and should be treated as freebeta.
+  const effectiveStatus: PaymentStatus =
+    report.payment_status === "unpaid" && !report.purchase_id
+      ? "freebeta"
+      : report.payment_status;
 
-  if (report.payment_status !== "paid" && report.payment_status !== "freebeta") {
+  if (effectiveStatus !== "paid" && effectiveStatus !== "freebeta") {
     sendJson(req, res, 402, { error: "Payment required", scanId });
     return;
   }
-
 
   const p = pdfPathFor(scanId);
   if (!fs.existsSync(p)) {
@@ -944,18 +960,11 @@ if (
     return;
   }
 
-  if (!fs.existsSync(p)) {
-    sendJson(req, res, 202, { status: "processing", scanId });
-    return;
-  }
-
-
   res.writeHead(200, {
     "Content-Type": "application/pdf",
     "Content-Disposition": `inline; filename="${scanId}.report.pdf"`,
     ...corsHeaders(req),
   });
-
 
   fs.createReadStream(p).pipe(res);
   return;
