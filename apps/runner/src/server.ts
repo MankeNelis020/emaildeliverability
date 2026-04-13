@@ -1,7 +1,7 @@
 // server.ts
 
 import "dotenv/config";
-import { createPurchase, getPurchase, updatePurchase } from "./purchaseStore.js";
+import { createPurchase, getPurchase, updatePurchase, initPurchaseStore } from "./purchaseStore.js";
 
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
@@ -78,6 +78,33 @@ const STORE_DIR = process.env.SCAN_STORE_DIR
 
 const store = createScanStore(STORE_DIR);
 
+// Persist purchases in the same data directory
+const PURCHASE_DIR = process.env.PURCHASE_DIR
+  ? path.resolve(process.env.PURCHASE_DIR)
+  : path.resolve(STORE_DIR, "..", "purchases");
+initPurchaseStore(PURCHASE_DIR);
+
+// CORS: accept comma-separated origins from env (APP_URL is the frontend URL)
+const ALLOWED_ORIGINS: string[] = (
+  process.env.ALLOWED_ORIGINS ||
+  process.env.APP_URL ||
+  "http://localhost:5173"
+)
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+function resolveOrigin(req: import("node:http").IncomingMessage): string {
+  const origin = String(req.headers.origin ?? "");
+  if (ALLOWED_ORIGINS.includes(origin)) return origin;
+  // allow any localhost in dev
+  if (
+    process.env.NODE_ENV !== "production" &&
+    origin.startsWith("http://localhost")
+  )
+    return origin;
+  return ALLOWED_ORIGINS[0] ?? "*";
+}
 
 // in-memory caches
 const reports = new Map<string, StoredReport>();
@@ -490,30 +517,48 @@ ${renderWebsiteEvidence(report)}
 }
 
 
-function sendJson(res: import("node:http").ServerResponse, status: number, payload: unknown) {
+function corsHeaders(req: import("node:http").IncomingMessage) {
+  return {
+    "Access-Control-Allow-Origin": resolveOrigin(req),
+    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type,Stripe-Signature",
+    "Vary": "Origin",
+  };
+}
+
+function sendJson(
+  req: import("node:http").IncomingMessage,
+  res: import("node:http").ServerResponse,
+  status: number,
+  payload: unknown
+) {
   res.writeHead(status, {
     "Content-Type": "application/json",
-    "Access-Control-Allow-Origin": "https://www.sendshield.nl",
-    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    ...corsHeaders(req),
   });
   res.end(JSON.stringify(payload));
 }
 
-
-function handleOptions(res: import("node:http").ServerResponse) {
-  res.writeHead(204, {
-    "Access-Control-Allow-Origin": "https://www.sendshield.nl",
-    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
-  });
+function handleOptions(
+  req: import("node:http").IncomingMessage,
+  res: import("node:http").ServerResponse
+) {
+  res.writeHead(204, corsHeaders(req));
   res.end();
 }
 
-import { normalizeWebsiteUrl } from "@crs/scanners";
+import { normalizeWebsiteUrl, parseAuthenticationResults } from "@crs/scanners";
 
 // Create + persist scan (so inbound can patch later)
-function makeInitialScan(scanId: string, hostname: string, sending_email?: string, contact_email?: string) {
+function makeInitialScan(
+  scanId: string,
+  hostname: string,
+  sending_email?: string,
+  contact_email?: string,
+  plan?: string,
+  inbound_test_url?: string,
+  recipient_count?: number,
+) {
   const website_url = normalizeWebsiteUrl(hostname, { stripPath: true, stripQuery: true, stripHash: true });
   return {
     schema_version: "1.0",
@@ -523,10 +568,27 @@ function makeInitialScan(scanId: string, hostname: string, sending_email?: strin
       website_url,
       sending_email: sending_email || "",
       contact_email: contact_email || "",
+      plan: plan || "basic",
+      inbound_test_url: inbound_test_url || null,
+      recipient_count: recipient_count || null,
       send_window: { enabled: false, timezone: "Europe/Amsterdam" },
     },
     email_scan: {},
     website_scan: {},
+    verified_evidence: null as null | {
+      received_at: string;
+      from: string;
+      to: string;
+      subject?: string;
+      message_id?: string;
+      auth: {
+        dkim?: { result: string; domain?: string; selector?: string };
+        spf?: { result: string; domain?: string; ip?: string };
+        dmarc?: { result: string; policy?: string };
+      };
+      tls?: { version?: string; cipher?: string };
+      raw_authentication_results?: string;
+    },
     scores: {
       email_readiness: { score: 0, max: 100 },
       website_readiness: { score: 0, max: 100 },
@@ -539,13 +601,13 @@ function makeInitialScan(scanId: string, hostname: string, sending_email?: strin
 
 const server = createServer((req, res) => {
   if (!req.url || !req.method) {
-    sendJson(res, 400, { error: "Invalid request" });
+    sendJson(req, res, 400, { error: "Invalid request" });
     return;
   }
 
 
   if (req.method === "OPTIONS") {
-    handleOptions(res);
+    handleOptions(req, res);
     return;
   }
 
@@ -555,7 +617,7 @@ const server = createServer((req, res) => {
 
   // HEALTH
   if (req.method === "GET" && url.pathname === "/health") {
-    sendJson(res, 200, { ok: true, service: "runner-api", time: new Date().toISOString() });
+    sendJson(req, res, 200, { ok: true, service: "runner-api", time: new Date().toISOString() });
     return;
   }
 
@@ -572,11 +634,14 @@ if (req.method === "POST" && url.pathname === "/api/scan") {
         hostname?: string;
         sending_email?: string;
         contact_email?: string;
+        plan?: "basic" | "verified";
+        inbound_test_url?: string;
+        recipient_count?: number;
       };
 
 
       if (!payload.hostname) {
-        sendJson(res, 400, { error: "hostname required" });
+        sendJson(req, res, 400, { error: "hostname required" });
         return;
       }
 
@@ -589,7 +654,10 @@ if (req.method === "POST" && url.pathname === "/api/scan") {
         scanId,
         payload.hostname,
         payload.sending_email,
-        payload.contact_email
+        payload.contact_email,
+        payload.plan,
+        payload.inbound_test_url,
+        payload.recipient_count,
       );
       store.save(scanId, scan);
 
@@ -646,43 +714,32 @@ store.save(scanId, scan);
 
 
 // 2) generate report from scan
+const plan = payload.plan ?? "basic";
 const report: StoredReport = {
   ...generateReportV1({
     ...scan,
-    // 🔑 belangrijk: maak inputs compleet (plan/sku behouden) + jouw payload velden toevoegen
     inputs: {
       ...(scan as any).inputs,
-
-      // 👇 jouw bestaande velden
       hostname: payload.hostname,
       website_url: (scan as any).inputs?.website_url,
       sending_email: (scan as any).inputs?.sending_email,
       contact_email: (scan as any).inputs?.contact_email,
-
-      // ✅ expliciet plan/sku borgen (Basic default)
-      plan:
-        (scan as any).inputs?.plan ??
-        (payload as any)?.plan ??
-        (payload as any)?.sku ??
-        "basic",
+      plan,
     },
   } as any),
 
-  payment_status: "unpaid",
+  // Direct scans (FREEBETA/dev) get freebeta access — paid flow uses /checkout/complete
+  payment_status: "freebeta",
 
-  // ✅ laat report.inputs staan (voor PDF/client inputs),
-  // maar OVERSCHRIJF NIET meer de hele inputs zonder merge
   inputs: {
     ...(scan as any).inputs,
     hostname: payload.hostname,
     website_url: (scan as any).inputs?.website_url,
     sending_email: (scan as any).inputs?.sending_email,
     contact_email: (scan as any).inputs?.contact_email,
-    plan:
-      (scan as any).inputs?.plan ??
-      (payload as any)?.plan ??
-      (payload as any)?.sku ??
-      "basic",
+    plan,
+    inbound_test_url: payload.inbound_test_url ?? null,
+    recipient_count: payload.recipient_count ?? null,
   },
 };
 
@@ -726,9 +783,9 @@ const report: StoredReport = {
       }
 
 
-      sendJson(res, 200, { scanId });
+      sendJson(req, res, 200, { scanId });
     } catch (e: any) {
-      sendJson(res, 400, {
+      sendJson(req, res, 400, {
         error: "Scan failed",
         detail: String(e?.message ?? e),
       });
@@ -748,14 +805,14 @@ if (
 ) {
   const scanId = url.pathname.replace("/api/scan/", "").replace("/mark-paid", "").trim();
   if (!scanId) {
-    sendJson(res, 400, { error: "scanId missing" });
+    sendJson(req, res, 400, { error: "scanId missing" });
     return;
   }
 
 
   const r = reports.get(scanId);
   if (!r) {
-    sendJson(res, 404, { error: "Report not found", scanId });
+    sendJson(req, res, 404, { error: "Report not found", scanId });
     return;
   }
 
@@ -764,7 +821,7 @@ if (
   reports.set(scanId, r);
 
 
-  sendJson(res, 200, { ok: true, scanId, payment_status: "paid" });
+  sendJson(req, res, 200, { ok: true, scanId, payment_status: "paid" });
   return;
 }
 
@@ -776,68 +833,73 @@ if (req.method === "POST" && url.pathname === "/api/checkout/create-session") {
 
 
   req.on("end", async () => {
-    let parsed: { sku?: "basic" | "verified"; scanId?: string };
-  
-  
+    let parsed: {
+      sku?: "basic" | "verified";
+      hostname?: string;
+      sending_email?: string;
+      contact_email?: string;
+      inbound_test_url?: string;
+      recipient_count?: number;
+    };
+
     try {
       parsed = JSON.parse(body || "{}");
     } catch (e) {
-      sendJson(res, 400, { error: "Invalid JSON body", detail: String(e) });
+      sendJson(req, res, 400, { error: "Invalid JSON body", detail: String(e) });
       return;
     }
-  
-  
+
     try {
       const sku = parsed.sku;
-      const scanId = parsed.scanId;
-  
-  
       if (!sku || (sku !== "basic" && sku !== "verified")) {
-        sendJson(res, 400, { error: "sku must be 'basic' or 'verified'" });
+        sendJson(req, res, 400, { error: "sku must be 'basic' or 'verified'" });
         return;
       }
-  
-  
+
       const priceId =
         sku === "verified"
           ? process.env.STRIPE_PRICE_VERIFIED
           : process.env.STRIPE_PRICE_BASIC;
-  
-  
+
       if (!priceId) {
-        sendJson(res, 500, { error: "Price not configured" });
+        sendJson(req, res, 500, { error: "Price not configured" });
         return;
       }
-  
-  
+
       if (!process.env.APP_URL) {
-        sendJson(res, 500, { error: "APP_URL not configured" });
+        sendJson(req, res, 500, { error: "APP_URL not configured" });
         return;
       }
-  
-  
+
       const purchaseId = randomUUID();
 
-      // purchase opslaan (pending)
+      // Persist purchase including scan form data so /checkout/complete can use it
       createPurchase({
         purchaseId,
         sku,
         status: "pending",
+        hostname: parsed.hostname,
+        sending_email: parsed.sending_email,
+        contact_email: parsed.contact_email,
+        inbound_test_url: parsed.inbound_test_url,
+        recipient_count: parsed.recipient_count,
         created_at: new Date().toISOString(),
       });
-      
+
       const session = await stripe.checkout.sessions.create({
         mode: "payment",
         line_items: [{ price: priceId, quantity: 1 }],
         success_url: `${process.env.APP_URL}/checkout/success?purchaseId=${purchaseId}&session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${process.env.APP_URL}/checkout/cancel?purchaseId=${purchaseId}`,
-        metadata: { purchaseId, sku, scanId: scanId ?? "" },
+        metadata: { purchaseId, sku },
       });
-  
-  
-      sendJson(res, 200, { url: session.url, purchaseId });
+
+      // Save the Stripe session ID so /checkout/complete can verify it
+      updatePurchase(purchaseId, { stripe_session_id: session.id });
+
+      sendJson(req, res, 200, { url: session.url, purchaseId });
     } catch (e) {
-      sendJson(res, 500, {
+      sendJson(req, res, 500, {
         error: "Failed to create Stripe checkout session",
         detail: e instanceof Error ? e.message : String(e),
       });
@@ -858,32 +920,32 @@ if (
 
 
   if (!scanId) {
-    sendJson(res, 400, { error: "scanId missing" });
+    sendJson(req, res, 400, { error: "scanId missing" });
     return;
   }
 
 
   const report = reports.get(scanId);
   if (!report) {
-    sendJson(res, 404, { error: "Report not found", scanId });
+    sendJson(req, res, 404, { error: "Report not found", scanId });
     return;
   }
 
 
   if (report.payment_status !== "paid" && report.payment_status !== "freebeta") {
-    sendJson(res, 402, { error: "Payment required", scanId });
+    sendJson(req, res, 402, { error: "Payment required", scanId });
     return;
   }
 
 
   const p = pdfPathFor(scanId);
   if (!fs.existsSync(p)) {
-    sendJson(res, 404, { error: "PDF not found", scanId });
+    sendJson(req, res, 404, { error: "PDF not found", scanId });
     return;
   }
 
   if (!fs.existsSync(p)) {
-    sendJson(res, 202, { status: "processing", scanId });
+    sendJson(req, res, 202, { status: "processing", scanId });
     return;
   }
 
@@ -891,7 +953,7 @@ if (
   res.writeHead(200, {
     "Content-Type": "application/pdf",
     "Content-Disposition": `inline; filename="${scanId}.report.pdf"`,
-    "Access-Control-Allow-Origin": "https://www.sendshield.nl",
+    ...corsHeaders(req),
   });
 
 
@@ -904,20 +966,31 @@ if (
 if (req.method === "GET" && url.pathname.startsWith("/api/scan/")) {
   const scanId = url.pathname.replace("/api/scan/", "").trim();
 
-
   if (!scanId) {
-    sendJson(res, 400, { error: "scanId missing" });
+    sendJson(req, res, 400, { error: "scanId missing" });
     return;
   }
-  
-  const report = reports.get(scanId);
+
+  // Try memory first, then fall back to disk (survives server restarts)
+  let report = reports.get(scanId) ?? null;
   if (!report) {
-    sendJson(res, 404, { error: "Report not found", scanId });
+    const reportPath = path.join(store.storeDir, `${scanId}.report.json`);
+    if (fs.existsSync(reportPath)) {
+      try {
+        report = JSON.parse(fs.readFileSync(reportPath, "utf-8")) as StoredReport;
+        reports.set(scanId, report); // warm the cache
+      } catch {
+        // corrupt file → fall through to 404
+      }
+    }
+  }
+
+  if (!report) {
+    sendJson(req, res, 404, { error: "Report not found", scanId });
     return;
   }
 
-
-  sendJson(res, 200, report);
+  sendJson(req, res, 200, report);
   return;
 }
 
@@ -930,74 +1003,72 @@ if (req.method === "POST" && url.pathname === "/api/checkout/complete") {
     try {
       const payload = JSON.parse(body || "{}") as {
         purchaseId?: string;
+        // Frontend sends these; fallback to values stored in purchase record
         hostname?: string;
         sending_email?: string;
         contact_email?: string;
+        inbound_test_url?: string;
+        recipient_count?: number;
       };
 
-
       if (!payload.purchaseId) {
-        sendJson(res, 400, { error: "purchaseId required" });
+        sendJson(req, res, 400, { error: "purchaseId required" });
         return;
       }
-
-
-      if (!payload.hostname) {
-        sendJson(res, 400, { error: "hostname required" });
-        return;
-      }
-
 
       const purchase = getPurchase(payload.purchaseId);
       if (!purchase) {
-        sendJson(res, 404, { error: "Purchase not found" });
+        sendJson(req, res, 404, { error: "Purchase not found" });
         return;
       }
-
 
       if (!purchase.stripe_session_id) {
-        sendJson(res, 400, { error: "Stripe session missing for purchase" });
+        sendJson(req, res, 400, { error: "Stripe session missing for purchase" });
         return;
       }
-
 
       const session = await stripe.checkout.sessions.retrieve(purchase.stripe_session_id);
-
-
       if (session.payment_status !== "paid") {
-        sendJson(res, 402, { error: "Payment not completed" });
+        sendJson(req, res, 402, { error: "Payment not completed" });
         return;
       }
 
+      updatePurchase(payload.purchaseId, { status: "paid", paid_at: new Date().toISOString() });
 
-      updatePurchase(payload.purchaseId, { status: "paid" });
-
+      // Merge payload with stored purchase data (purchase data takes lower priority — payload wins)
+      const hostname = payload.hostname || purchase.hostname || "";
+      if (!hostname) {
+        sendJson(req, res, 400, { error: "hostname required" });
+        return;
+      }
+      const sending_email = payload.sending_email ?? purchase.sending_email;
+      const contact_email = payload.contact_email ?? purchase.contact_email;
+      const inbound_test_url = payload.inbound_test_url ?? purchase.inbound_test_url;
+      const recipient_count = payload.recipient_count ?? purchase.recipient_count;
 
       const scanId = randomUUID();
 
-
       const scan = makeInitialScan(
         scanId,
-        payload.hostname,
-        payload.sending_email,
-        payload.contact_email
+        hostname,
+        sending_email,
+        contact_email,
+        purchase.sku,
+        inbound_test_url,
+        recipient_count,
       );
-
 
       store.save(scanId, scan);
 
-
       try {
-        const emailAuth = await scanEmailAuth(payload.hostname);
+        const emailAuth = await scanEmailAuth(hostname);
         (scan as any).email_auth = emailAuth;
       } catch (e) {
         console.warn("[CRS] email auth scan failed:", String((e as any)?.message ?? e));
         (scan as any).email_auth = null;
       }
 
-
       store.save(scanId, scan);
-
 
       try {
         const websiteEvidence = await scanWebsiteHttp(scan.inputs.website_url, {
@@ -1009,49 +1080,38 @@ if (req.method === "POST" && url.pathname === "/api/checkout/complete") {
         console.log("[CRS] website scan failed:", String((e as any)?.message ?? e));
       }
 
-
       scan.meta = {
         ...scan.meta,
         runtime_ms: Date.now() - new Date(scan.created_at).getTime(),
       };
 
-
       store.save(scanId, scan);
 
+      const scanInputs = {
+        ...(scan as any).inputs,
+        hostname,
+        website_url: (scan as any).inputs?.website_url,
+        sending_email: sending_email ?? "",
+        contact_email: contact_email ?? "",
+        plan: purchase.sku,
+        inbound_test_url: inbound_test_url ?? null,
+        recipient_count: recipient_count ?? null,
+      };
 
       const report: StoredReport = {
-        ...generateReportV1({
-          ...scan,
-          inputs: {
-            ...(scan as any).inputs,
-            hostname: payload.hostname,
-            website_url: (scan as any).inputs?.website_url,
-            sending_email: payload.sending_email ?? "",
-            contact_email: payload.contact_email ?? "",
-            plan: purchase.sku,
-          },
-        } as any),
-
-
+        ...generateReportV1({ ...scan, inputs: scanInputs } as any),
         payment_status: "paid",
         purchase_id: payload.purchaseId,
         stripe_session_id: purchase.stripe_session_id,
-
-
-        inputs: {
-          ...(scan as any).inputs,
-          hostname: payload.hostname,
-          website_url: (scan as any).inputs?.website_url,
-          sending_email: payload.sending_email ?? "",
-          contact_email: payload.contact_email ?? "",
-          plan: purchase.sku,
-        },
+        inputs: scanInputs,
       };
-
 
       (report as any).email_auth = (scan as any).email_auth ?? null;
       (report as any).website_scan = (scan as any).website_scan ?? null;
+      (report as any).verified_evidence = null;
 
+      // Link scan back to purchase
+      updatePurchase(payload.purchaseId, { scan_id: scanId });
 
       try {
         const reportPath = path.join(store.storeDir, `${scanId}.report.json`);
@@ -1060,30 +1120,29 @@ if (req.method === "POST" && url.pathname === "/api/checkout/complete") {
         console.warn("[CRS] failed to write report.json", scanId, String(err));
       }
 
-
       reports.set(scanId, report);
-
 
       const html = renderReportHtml(report);
       const pdfPath = pdfPathFor(scanId);
 
-
       console.log("[CRS] writing pdf:", pdfPath);
       await htmlToPdf(html, pdfPath);
 
-
       const exists = fs.existsSync(pdfPath);
       console.log("[CRS] pdf written:", pdfPath, "exists:", exists);
-
 
       if (!exists) {
         throw new Error(`PDF generation reported success but file missing: ${pdfPath}`);
       }
 
+      // Inform the user of their inbound test address if verified plan
+      const inbound_address = purchase.sku === "verified"
+        ? `verify+${scanId}@${process.env.INBOUND_DOMAIN || "inbound.sendshield.nl"}`
+        : null;
 
-      sendJson(res, 200, { scanId });
+      sendJson(req, res, 200, { scanId, inbound_address });
     } catch (e) {
-      sendJson(res, 500, {
+      sendJson(req, res, 500, {
         error: "Failed to complete checkout and start scan",
         detail: e instanceof Error ? e.message : String(e),
       });
@@ -1094,8 +1153,205 @@ if (req.method === "POST" && url.pathname === "/api/checkout/complete") {
   return;
 }
 
+// STRIPE WEBHOOK
+if (req.method === "POST" && url.pathname === "/api/stripe/webhook") {
+  const chunks: Buffer[] = [];
+  req.on("data", (chunk) => chunks.push(chunk));
+  req.on("end", async () => {
+    const rawBody = Buffer.concat(chunks);
+    const sig = req.headers["stripe-signature"] as string | undefined;
+    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+    let event: import("stripe").Stripe.Event;
+    try {
+      if (webhookSecret && sig) {
+        event = stripe.webhooks.constructEvent(rawBody, sig, webhookSecret);
+      } else {
+        // No secret configured (dev) — parse directly
+        event = JSON.parse(rawBody.toString()) as import("stripe").Stripe.Event;
+      }
+    } catch (e) {
+      console.warn("[CRS] Stripe webhook parse failed:", String(e));
+      sendJson(req, res, 400, { error: "Invalid webhook payload" });
+      return;
+    }
+
+    try {
+      if (event.type === "checkout.session.completed") {
+        const session = event.data.object as import("stripe").Stripe.Checkout.Session;
+        const purchaseId = session.metadata?.purchaseId;
+        if (purchaseId) {
+          updatePurchase(purchaseId, {
+            status: "paid",
+            stripe_session_id: session.id,
+            paid_at: new Date().toISOString(),
+          });
+          console.log("[CRS] Stripe webhook: purchase marked paid:", purchaseId);
+        }
+      }
+      sendJson(req, res, 200, { received: true });
+    } catch (e) {
+      sendJson(req, res, 500, { error: "Webhook handler failed", detail: String(e) });
+    }
+  });
+  return;
+}
+
+// INBOUND EMAIL WEBHOOK — receives parsed email from mail service (Postmark, SendGrid, etc.)
+// Extracts verified evidence from headers, patches scan + regenerates PDF.
+if (
+  req.method === "POST" &&
+  url.pathname.startsWith("/api/scan/") &&
+  url.pathname.endsWith("/inbound")
+) {
+  const scanId = url.pathname
+    .replace("/api/scan/", "")
+    .replace("/inbound", "")
+    .trim();
+
+  if (!scanId) {
+    sendJson(req, res, 400, { error: "scanId missing" });
+    return;
+  }
+
+  let body = "";
+  req.on("data", (chunk) => (body += chunk));
+  req.on("end", async () => {
+    try {
+      const payload = JSON.parse(body || "{}") as {
+        // Generic format
+        from?: string;
+        to?: string;
+        subject?: string;
+        message_id?: string;
+        received_at?: string;
+        authentication_results?: string;
+        received?: string;
+        headers?: Record<string, string>;
+        // Postmark format
+        FromFull?: { Email: string; Name?: string };
+        To?: string;
+        Subject?: string;
+        MessageID?: string;
+        ReceivedAt?: string;
+        Headers?: Array<{ Name: string; Value: string }>;
+      };
+
+      // Normalise regardless of sender format
+      const from =
+        payload.from ?? payload.FromFull?.Email ?? "";
+      const to =
+        payload.to ?? payload.To ?? "";
+      const subject =
+        payload.subject ?? payload.Subject ?? "";
+      const message_id =
+        payload.message_id ?? payload.MessageID ?? "";
+      const received_at =
+        payload.received_at ?? payload.ReceivedAt ?? new Date().toISOString();
+
+      // Flatten headers from either format
+      const flatHeaders: Record<string, string> = {};
+      if (payload.headers) {
+        for (const [k, v] of Object.entries(payload.headers)) {
+          flatHeaders[k.toLowerCase()] = v;
+        }
+      }
+      if (Array.isArray(payload.Headers)) {
+        for (const h of payload.Headers) {
+          flatHeaders[h.Name.toLowerCase()] = h.Value;
+        }
+      }
+
+      const rawAuthResults =
+        payload.authentication_results ??
+        flatHeaders["authentication-results"] ??
+        flatHeaders["arc-authentication-results"] ??
+        "";
+
+      const rawReceived = payload.received ?? flatHeaders["received"] ?? "";
+
+      // Parse authentication results
+      const auth = parseAuthenticationResults(rawAuthResults);
+
+      // Extract TLS info from Received header (e.g. "using TLSv1.3 with cipher ...")
+      const tlsVersion = rawReceived.match(/TLSv[\d.]+/i)?.[0];
+      const tlsCipher = rawReceived.match(/cipher\s+(\S+)/i)?.[1];
+
+      const verifiedEvidence = {
+        received_at,
+        from,
+        to,
+        subject,
+        message_id,
+        auth,
+        tls: tlsVersion ? { version: tlsVersion, cipher: tlsCipher } : undefined,
+        raw_authentication_results: rawAuthResults || undefined,
+      };
+
+      // Load scan, patch, save
+      const scan = store.load(scanId);
+      if (!scan) {
+        sendJson(req, res, 404, { error: "Scan not found", scanId });
+        return;
+      }
+
+      (scan as any).verified_evidence = verifiedEvidence;
+      store.save(scanId, scan);
+
+      // Patch in-memory report and regenerate PDF
+      const existing = reports.get(scanId);
+      const reportInputs = existing?.inputs ?? (scan as any).inputs ?? {};
+
+      const updatedReport: StoredReport = {
+        ...(existing ?? generateReportV1({ ...scan } as any)),
+        ...(existing ? {} : {}),
+        inputs: reportInputs,
+        payment_status: (existing?.payment_status ?? "paid") as PaymentStatus,
+        purchase_id: existing?.purchase_id,
+        stripe_session_id: existing?.stripe_session_id,
+      };
+      (updatedReport as any).email_auth = (scan as any).email_auth ?? null;
+      (updatedReport as any).website_scan = (scan as any).website_scan ?? null;
+      (updatedReport as any).verified_evidence = verifiedEvidence;
+
+      reports.set(scanId, updatedReport);
+
+      // Persist updated report.json
+      try {
+        const reportPath = path.join(store.storeDir, `${scanId}.report.json`);
+        fs.writeFileSync(reportPath, JSON.stringify(updatedReport, null, 2), "utf-8");
+      } catch (err) {
+        console.warn("[CRS] failed to write report.json after inbound:", String(err));
+      }
+
+      // Regenerate PDF
+      try {
+        const html = renderReportHtml(updatedReport);
+        const pdfPath = pdfPathFor(scanId);
+        await htmlToPdf(html, pdfPath);
+        console.log("[CRS] PDF regenerated after inbound email:", scanId);
+      } catch (e) {
+        console.warn("[CRS] PDF regeneration failed:", String(e));
+      }
+
+      sendJson(req, res, 200, {
+        ok: true,
+        scanId,
+        auth,
+        tls: tlsVersion ? { version: tlsVersion, cipher: tlsCipher } : null,
+      });
+    } catch (e) {
+      sendJson(req, res, 400, {
+        error: "Failed to process inbound email",
+        detail: e instanceof Error ? e.message : String(e),
+      });
+    }
+  });
+  return;
+}
+
 // fallback
-sendJson(res, 404, { error: "Not found" });
+sendJson(req, res, 404, { error: "Not found" });
 }); // <-- sluit createServer callback netjes af
 
 

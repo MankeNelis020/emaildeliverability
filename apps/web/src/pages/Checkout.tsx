@@ -1,11 +1,21 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { startScan, createCheckoutSession } from "../lib/api";
+import { startScan, createCheckoutSession, type ScanIntent } from "../lib/api";
+
+function readIntent(): ScanIntent | null {
+  try {
+    const raw = sessionStorage.getItem("crs_scan_intent_v1");
+    return raw ? (JSON.parse(raw) as ScanIntent) : null;
+  } catch {
+    return null;
+  }
+}
 
 const ACCESS_CODE = "FREEBETA";
 
 export default function Checkout() {
   const [hostname, setHostname] = useState("");
+  const [intent, setIntent] = useState<ScanIntent | null>(null);
   const [code, setCode] = useState("");
   const [sku, setSku] = useState<"basic" | "verified">("basic");
   const [error, setError] = useState("");
@@ -19,9 +29,15 @@ export default function Checkout() {
       return;
     }
     setHostname(stored);
+    const storedIntent = readIntent();
+    if (storedIntent) {
+      setIntent(storedIntent);
+      // Pre-select the plan the user already chose on /scan
+      setSku(storedIntent.plan);
+    }
   }, [navigate]);
 
-  // ✅ Oude FREEBETA flow blijft intact
+  // FREEBETA flow (direct scan, no payment)
   const handleCheckout = async () => {
     if (code.trim().toUpperCase() !== ACCESS_CODE) {
       setError("Invalid access code. Try FREEBETA.");
@@ -31,7 +47,17 @@ export default function Checkout() {
     setError("");
     setIsLoading(true);
     try {
-      const { scanId } = await startScan(hostname);
+      const fallbackIntent: ScanIntent = intent ?? {
+        plan: sku,
+        websiteUrl: `https://${hostname}`,
+        hostname,
+        sendingEmail: "",
+        customerEmail: "",
+        recipientCount: null,
+        inboundTestUrl: null,
+        createdAt: new Date().toISOString(),
+      };
+      const { scanId } = await startScan(fallbackIntent);
       sessionStorage.setItem("scanId", scanId);
       navigate(`/result/${scanId}`);
     } catch (err) {
@@ -41,16 +67,31 @@ export default function Checkout() {
     }
   };
 
-  // ✅ Nieuwe Stripe betaalflow
+  // Stripe paid flow
   const handlePaidCheckout = async () => {
     setError("");
     setIsLoading(true);
     try {
-      const { url, purchaseId } = await createCheckoutSession(sku);
+      // Build intent with possibly updated sku (user may have changed plan on this page)
+      const effectiveIntent: ScanIntent = intent
+        ? { ...intent, plan: sku }
+        : {
+            plan: sku,
+            websiteUrl: `https://${hostname}`,
+            hostname,
+            sendingEmail: "",
+            customerEmail: "",
+            recipientCount: null,
+            inboundTestUrl: null,
+            createdAt: new Date().toISOString(),
+          };
 
-      // bewaren voor success page / later verification
+      const { url, purchaseId } = await createCheckoutSession(sku, effectiveIntent);
+
       sessionStorage.setItem("purchaseId", purchaseId);
       sessionStorage.setItem("scanHostname", hostname);
+      // Store effective intent in case plan changed
+      sessionStorage.setItem("crs_scan_intent_v1", JSON.stringify(effectiveIntent));
 
       window.location.href = url;
     } catch (err) {
