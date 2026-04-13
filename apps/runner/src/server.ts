@@ -549,6 +549,56 @@ function handleOptions(
 
 import { normalizeWebsiteUrl, parseAuthenticationResults } from "@crs/scanners";
 
+// ── Google Sheets CRM webhook ────────────────────────────────────────────────
+// Fire-and-forget: stuurt scan-data naar een Google Apps Script web app.
+// Blokkeert de scan-response nooit als de sheet niet bereikbaar is.
+async function notifySheet(
+  report: StoredReport,
+  inbound_address?: string | null
+): Promise<void> {
+  const webhookUrl = process.env.GOOGLE_SHEETS_WEBHOOK_URL;
+  if (!webhookUrl) return; // niet geconfigureerd → stil overslaan
+
+  const apiBase =
+    process.env.API_BASE_URL ||
+    process.env.APP_URL?.replace(/\/$/, "") ||
+    "http://localhost:8787";
+
+  const payload = {
+    created_at:      report.generated_at ?? new Date().toISOString(),
+    scan_id:         report.scan_id,
+    purchase_id:     report.purchase_id ?? "",
+    plan:            (report as any).inputs?.plan ?? "basic",
+    payment_status:  report.payment_status,
+    hostname:        (report as any).inputs?.hostname ?? "",
+    sending_email:   (report as any).inputs?.sending_email ?? "",
+    contact_email:   (report as any).inputs?.contact_email ?? "",
+    recipient_count: (report as any).inputs?.recipient_count ?? null,
+    score_email:     report.scores?.email?.score ?? null,
+    score_website:   report.scores?.website?.score ?? null,
+    score_campaign:  report.scores?.campaign?.score ?? null,
+    verdict:         report.verdict ?? "",
+    ready_to_send:   report.ready_to_send ?? false,
+    blockers:        Array.isArray(report.blockers) ? report.blockers : [],
+    pdf_url:         `${apiBase}/api/scan/${report.scan_id}/report.pdf`,
+    inbound_address: inbound_address ?? null,
+  };
+
+  try {
+    const res = await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) {
+      console.warn("[CRS] Sheets webhook returned", res.status);
+    }
+  } catch (e) {
+    console.warn("[CRS] Sheets webhook failed (non-fatal):", String(e));
+  }
+}
+
 // Create + persist scan (so inbound can patch later)
 function makeInitialScan(
   scanId: string,
@@ -782,6 +832,8 @@ const report: StoredReport = {
         throw new Error(`PDF generation reported success but file missing: ${pdfPath}`);
       }
 
+      // Notify Google Sheets CRM (fire-and-forget)
+      notifySheet(report).catch(() => {});
 
       sendJson(req, res, 200, { scanId });
     } catch (e: any) {
@@ -1148,6 +1200,9 @@ if (req.method === "POST" && url.pathname === "/api/checkout/complete") {
       const inbound_address = purchase.sku === "verified"
         ? `verify+${scanId}@${process.env.INBOUND_DOMAIN || "inbound.sendshield.nl"}`
         : null;
+
+      // Notify Google Sheets CRM (fire-and-forget)
+      notifySheet(report, inbound_address).catch(() => {});
 
       sendJson(req, res, 200, { scanId, inbound_address });
     } catch (e) {
