@@ -9,7 +9,6 @@ type Errors = {
   sendingEmail?: string;
   customerEmail?: string;
   recipientCount?: string;
-  inboundTestUrl?: string;
 };
 
 const emailRegex = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
@@ -36,7 +35,6 @@ export default function Scan() {
   const [sendingEmail, setSendingEmail] = useState("");
   const [customerEmail, setCustomerEmail] = useState("");
   const [recipientCount, setRecipientCount] = useState("");
-  const [inboundTestUrl, setInboundTestUrl] = useState("");
   const [errors, setErrors] = useState<Errors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const navigate = useNavigate();
@@ -50,21 +48,15 @@ export default function Scan() {
     if (isVerified) {
       const count = Number(recipientCount);
       if (!Number.isInteger(count) || count < 1) return false;
-      if (!normalizeUrl(inboundTestUrl)) return false;
     }
     return true;
-  }, [websiteUrl, sendingEmail, customerEmail, recipientCount, inboundTestUrl, isVerified]);
+  }, [websiteUrl, sendingEmail, customerEmail, recipientCount, isVerified]);
 
   const handlePlanChange = (nextPlan: Plan) => {
     setPlan(nextPlan);
     if (nextPlan === "basic") {
       setRecipientCount("");
-      setInboundTestUrl("");
-      setErrors((prev) => ({
-        ...prev,
-        recipientCount: undefined,
-        inboundTestUrl: undefined,
-      }));
+      setErrors((prev) => ({ ...prev, recipientCount: undefined }));
     }
   };
 
@@ -85,9 +77,6 @@ export default function Scan() {
       if (!Number.isInteger(count) || count < 1) {
         nextErrors.recipientCount = "Recipient count must be at least 1.";
       }
-      if (!normalizeUrl(inboundTestUrl)) {
-        nextErrors.inboundTestUrl = "Enter a valid inbound test URL.";
-      }
     }
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
@@ -107,7 +96,7 @@ export default function Scan() {
       sendingEmail: sendingEmail.trim(),
       customerEmail: customerEmail.trim(),
       recipientCount: isVerified ? Number(recipientCount) : null,
-      inboundTestUrl: isVerified ? normalizeUrl(inboundTestUrl) : null,
+      inboundTestUrl: null,
       createdAt: new Date().toISOString(),
     };
     sessionStorage.setItem("crs_scan_intent_v1", JSON.stringify(payload));
@@ -205,21 +194,9 @@ export default function Scan() {
                   />
                   {errors.recipientCount ? <p className="helperText text-red-300">{errors.recipientCount}</p> : null}
                 </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-semibold text-white" htmlFor="inbound-url">
-                    Unique inbound test URL
-                  </label>
-                  <input
-                    id="inbound-url"
-                    className="inputField"
-                    type="url"
-                    placeholder="https://verify.example.com"
-                    value={inboundTestUrl}
-                    onChange={(event) => setInboundTestUrl(event.target.value)}
-                  />
-                  <p className="helperText">Send a test email to this unique address after checkout.</p>
-                  {errors.inboundTestUrl ? <p className="helperText text-red-300">{errors.inboundTestUrl}</p> : null}
-                </div>
+                <p className="helperText">
+                  After checkout you'll receive a unique address to send your test email to.
+                </p>
               </>
             ) : null}
           </div>
