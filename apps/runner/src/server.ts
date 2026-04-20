@@ -94,6 +94,8 @@ const ALLOWED_ORIGINS: string[] = (
   .map((s) => s.trim())
   .filter(Boolean);
 
+const INBOUND_DOMAIN = process.env.INBOUND_DOMAIN ?? "mail-verify.nl";
+
 function resolveOrigin(req: import("node:http").IncomingMessage): string {
   const origin = String(req.headers.origin ?? "");
   if (ALLOWED_ORIGINS.includes(origin)) return origin;
@@ -547,7 +549,7 @@ function handleOptions(
   res.end();
 }
 
-import { normalizeWebsiteUrl, parseAuthenticationResults } from "@crs/scanners";
+import { normalizeWebsiteUrl, parseAuthenticationResults, extractScanTokenFromRecipient } from "@crs/scanners";
 
 // ── Google Sheets CRM webhook ────────────────────────────────────────────────
 // Fire-and-forget: stuurt scan-data naar een Google Apps Script web app.
@@ -648,6 +650,101 @@ function makeInitialScan(
   };
 }
 
+
+// ── Inbound email helpers ────────────────────────────────────────────────────
+
+function flattenInboundHeaders(
+  headers?: Record<string, string>,
+  pmHeaders?: Array<{ Name: string; Value: string }>
+): Record<string, string> {
+  const flat: Record<string, string> = {};
+  if (headers) {
+    for (const [k, v] of Object.entries(headers)) flat[k.toLowerCase()] = v;
+  }
+  if (Array.isArray(pmHeaders)) {
+    for (const h of pmHeaders) flat[h.Name.toLowerCase()] = h.Value;
+  }
+  return flat;
+}
+
+function buildVerifiedEvidence(
+  flat: Record<string, string>,
+  params: {
+    from: string; to: string; subject: string; message_id: string; received_at: string;
+    authentication_results?: string; received?: string;
+  }
+) {
+  const rawAuthResults =
+    params.authentication_results ??
+    flat["authentication-results"] ??
+    flat["arc-authentication-results"] ??
+    "";
+  const rawReceived = params.received ?? flat["received"] ?? "";
+  const auth = parseAuthenticationResults(rawAuthResults);
+  const tlsMatch = rawReceived.match(/TLSv[\d.]+/i);
+  const cipherMatch = rawReceived.match(/cipher\s+(\S+)/i);
+  return {
+    received_at: params.received_at,
+    from: params.from,
+    to: params.to,
+    subject: params.subject,
+    message_id: params.message_id,
+    auth,
+    tls: tlsMatch ? { version: tlsMatch[0], cipher: cipherMatch?.[1] } : undefined,
+    raw_authentication_results: rawAuthResults || undefined,
+  };
+}
+
+async function applyVerifiedEvidenceToScan(
+  scanId: string,
+  evidence: ReturnType<typeof buildVerifiedEvidence>
+): Promise<StoredReport | null> {
+  const scan = store.load(scanId);
+  if (!scan) return null;
+
+  (scan as any).verified_evidence = evidence;
+  store.save(scanId, scan);
+
+  // Load report from memory, fall back to disk (survives restarts)
+  let existing = reports.get(scanId) ?? null;
+  if (!existing) {
+    const rp = path.join(store.storeDir, `${scanId}.report.json`);
+    if (fs.existsSync(rp)) {
+      try { existing = JSON.parse(fs.readFileSync(rp, "utf-8")) as StoredReport; } catch { /* ignore */ }
+    }
+  }
+
+  const reportInputs = existing?.inputs ?? (scan as any).inputs ?? {};
+  const updatedReport: StoredReport = {
+    ...(existing ?? (generateReportV1({ ...scan } as any) as StoredReport)),
+    inputs: reportInputs,
+    payment_status: (existing?.payment_status ?? "paid") as PaymentStatus,
+    purchase_id: existing?.purchase_id,
+    stripe_session_id: existing?.stripe_session_id,
+  };
+  (updatedReport as any).email_auth = (scan as any).email_auth ?? null;
+  (updatedReport as any).website_scan = (scan as any).website_scan ?? null;
+  (updatedReport as any).verified_evidence = evidence;
+
+  reports.set(scanId, updatedReport);
+
+  try {
+    const rp = path.join(store.storeDir, `${scanId}.report.json`);
+    fs.writeFileSync(rp, JSON.stringify(updatedReport, null, 2), "utf-8");
+  } catch (err) {
+    console.warn("[CRS] failed to write report.json after inbound:", String(err));
+  }
+
+  try {
+    const html = renderReportHtml(updatedReport);
+    await htmlToPdf(html, pdfPathFor(scanId));
+    console.log("[CRS] PDF regenerated after inbound:", scanId);
+  } catch (e) {
+    console.warn("[CRS] PDF regeneration failed:", String(e));
+  }
+
+  return updatedReport;
+}
 
 const server = createServer((req, res) => {
   if (!req.url || !req.method) {
@@ -1198,7 +1295,7 @@ if (req.method === "POST" && url.pathname === "/api/checkout/complete") {
 
       // Inform the user of their inbound test address if verified plan
       const inbound_address = purchase.sku === "verified"
-        ? `verify+${scanId}@${process.env.INBOUND_DOMAIN || "inbound.sendshield.nl"}`
+        ? `verify+${scanId}@${INBOUND_DOMAIN}`
         : null;
 
       // Notify Google Sheets CRM (fire-and-forget)
@@ -1261,8 +1358,58 @@ if (req.method === "POST" && url.pathname === "/api/stripe/webhook") {
   return;
 }
 
-// INBOUND EMAIL WEBHOOK — receives parsed email from mail service (Postmark, SendGrid, etc.)
-// Extracts verified evidence from headers, patches scan + regenerates PDF.
+// POSTMARK INBOUND WEBHOOK — exact match; extracts scanId from recipient header.
+// Must be placed BEFORE the wildcard /api/scan/:scanId/inbound route.
+if (req.method === "POST" && url.pathname === "/api/scan/inbound") {
+  let body = "";
+  req.on("data", (chunk) => (body += chunk));
+  req.on("end", async () => {
+    try {
+      const payload = JSON.parse(body || "{}") as {
+        from?: string; to?: string; subject?: string; message_id?: string;
+        received_at?: string; authentication_results?: string; received?: string;
+        headers?: Record<string, string>;
+        FromFull?: { Email: string; Name?: string }; To?: string; Subject?: string;
+        MessageID?: string; ReceivedAt?: string;
+        Headers?: Array<{ Name: string; Value: string }>;
+      };
+
+      const flat = flattenInboundHeaders(payload.headers, payload.Headers);
+      const scanId = extractScanTokenFromRecipient(flat, INBOUND_DOMAIN);
+      if (!scanId) {
+        sendJson(req, res, 400, { error: "Could not extract scanId from recipient headers" });
+        return;
+      }
+
+      const evidence = buildVerifiedEvidence(flat, {
+        from: payload.from ?? payload.FromFull?.Email ?? "",
+        to: payload.to ?? payload.To ?? "",
+        subject: payload.subject ?? payload.Subject ?? "",
+        message_id: payload.message_id ?? payload.MessageID ?? "",
+        received_at: payload.received_at ?? payload.ReceivedAt ?? new Date().toISOString(),
+        authentication_results: payload.authentication_results,
+        received: payload.received,
+      });
+
+      const updated = await applyVerifiedEvidenceToScan(scanId, evidence);
+      if (!updated) {
+        sendJson(req, res, 404, { error: "Scan not found", scanId });
+        return;
+      }
+
+      sendJson(req, res, 200, { ok: true, scanId, auth: evidence.auth, tls: evidence.tls ?? null });
+    } catch (e) {
+      sendJson(req, res, 400, {
+        error: "Failed to process inbound email",
+        detail: e instanceof Error ? e.message : String(e),
+      });
+    }
+  });
+  return;
+}
+
+// INBOUND EMAIL WEBHOOK — wildcard /api/scan/:scanId/inbound
+// Receives parsed email from mail service; patches scan + regenerates PDF.
 if (
   req.method === "POST" &&
   url.pathname.startsWith("/api/scan/") &&
@@ -1283,127 +1430,32 @@ if (
   req.on("end", async () => {
     try {
       const payload = JSON.parse(body || "{}") as {
-        // Generic format
-        from?: string;
-        to?: string;
-        subject?: string;
-        message_id?: string;
-        received_at?: string;
-        authentication_results?: string;
-        received?: string;
+        from?: string; to?: string; subject?: string; message_id?: string;
+        received_at?: string; authentication_results?: string; received?: string;
         headers?: Record<string, string>;
-        // Postmark format
-        FromFull?: { Email: string; Name?: string };
-        To?: string;
-        Subject?: string;
-        MessageID?: string;
-        ReceivedAt?: string;
+        FromFull?: { Email: string; Name?: string }; To?: string; Subject?: string;
+        MessageID?: string; ReceivedAt?: string;
         Headers?: Array<{ Name: string; Value: string }>;
       };
 
-      // Normalise regardless of sender format
-      const from =
-        payload.from ?? payload.FromFull?.Email ?? "";
-      const to =
-        payload.to ?? payload.To ?? "";
-      const subject =
-        payload.subject ?? payload.Subject ?? "";
-      const message_id =
-        payload.message_id ?? payload.MessageID ?? "";
-      const received_at =
-        payload.received_at ?? payload.ReceivedAt ?? new Date().toISOString();
+      const flat = flattenInboundHeaders(payload.headers, payload.Headers);
+      const evidence = buildVerifiedEvidence(flat, {
+        from: payload.from ?? payload.FromFull?.Email ?? "",
+        to: payload.to ?? payload.To ?? "",
+        subject: payload.subject ?? payload.Subject ?? "",
+        message_id: payload.message_id ?? payload.MessageID ?? "",
+        received_at: payload.received_at ?? payload.ReceivedAt ?? new Date().toISOString(),
+        authentication_results: payload.authentication_results,
+        received: payload.received,
+      });
 
-      // Flatten headers from either format
-      const flatHeaders: Record<string, string> = {};
-      if (payload.headers) {
-        for (const [k, v] of Object.entries(payload.headers)) {
-          flatHeaders[k.toLowerCase()] = v;
-        }
-      }
-      if (Array.isArray(payload.Headers)) {
-        for (const h of payload.Headers) {
-          flatHeaders[h.Name.toLowerCase()] = h.Value;
-        }
-      }
-
-      const rawAuthResults =
-        payload.authentication_results ??
-        flatHeaders["authentication-results"] ??
-        flatHeaders["arc-authentication-results"] ??
-        "";
-
-      const rawReceived = payload.received ?? flatHeaders["received"] ?? "";
-
-      // Parse authentication results
-      const auth = parseAuthenticationResults(rawAuthResults);
-
-      // Extract TLS info from Received header (e.g. "using TLSv1.3 with cipher ...")
-      const tlsVersion = rawReceived.match(/TLSv[\d.]+/i)?.[0];
-      const tlsCipher = rawReceived.match(/cipher\s+(\S+)/i)?.[1];
-
-      const verifiedEvidence = {
-        received_at,
-        from,
-        to,
-        subject,
-        message_id,
-        auth,
-        tls: tlsVersion ? { version: tlsVersion, cipher: tlsCipher } : undefined,
-        raw_authentication_results: rawAuthResults || undefined,
-      };
-
-      // Load scan, patch, save
-      const scan = store.load(scanId);
-      if (!scan) {
+      const updated = await applyVerifiedEvidenceToScan(scanId, evidence);
+      if (!updated) {
         sendJson(req, res, 404, { error: "Scan not found", scanId });
         return;
       }
 
-      (scan as any).verified_evidence = verifiedEvidence;
-      store.save(scanId, scan);
-
-      // Patch in-memory report and regenerate PDF
-      const existing = reports.get(scanId);
-      const reportInputs = existing?.inputs ?? (scan as any).inputs ?? {};
-
-      const updatedReport: StoredReport = {
-        ...(existing ?? generateReportV1({ ...scan } as any)),
-        ...(existing ? {} : {}),
-        inputs: reportInputs,
-        payment_status: (existing?.payment_status ?? "paid") as PaymentStatus,
-        purchase_id: existing?.purchase_id,
-        stripe_session_id: existing?.stripe_session_id,
-      };
-      (updatedReport as any).email_auth = (scan as any).email_auth ?? null;
-      (updatedReport as any).website_scan = (scan as any).website_scan ?? null;
-      (updatedReport as any).verified_evidence = verifiedEvidence;
-
-      reports.set(scanId, updatedReport);
-
-      // Persist updated report.json
-      try {
-        const reportPath = path.join(store.storeDir, `${scanId}.report.json`);
-        fs.writeFileSync(reportPath, JSON.stringify(updatedReport, null, 2), "utf-8");
-      } catch (err) {
-        console.warn("[CRS] failed to write report.json after inbound:", String(err));
-      }
-
-      // Regenerate PDF
-      try {
-        const html = renderReportHtml(updatedReport);
-        const pdfPath = pdfPathFor(scanId);
-        await htmlToPdf(html, pdfPath);
-        console.log("[CRS] PDF regenerated after inbound email:", scanId);
-      } catch (e) {
-        console.warn("[CRS] PDF regeneration failed:", String(e));
-      }
-
-      sendJson(req, res, 200, {
-        ok: true,
-        scanId,
-        auth,
-        tls: tlsVersion ? { version: tlsVersion, cipher: tlsCipher } : null,
-      });
+      sendJson(req, res, 200, { ok: true, scanId, auth: evidence.auth, tls: evidence.tls ?? null });
     } catch (e) {
       sendJson(req, res, 400, {
         error: "Failed to process inbound email",
