@@ -95,6 +95,25 @@ function esc(s: any) {
 }
 
 
+// Parse multipart/form-data with busboy
+function parseMultipart(req: IncomingMessage): Promise<Record<string, string>> {
+  return new Promise((resolve, reject) => {
+    const fields: Record<string, string> = {};
+    const bb = Busboy({ headers: req.headers as any });
+    bb.on("field", (name, val) => { fields[name] = val; });
+    bb.on("file", (_name, stream) => { stream.resume(); }); // drain any file fields
+    bb.on("finish", () => resolve(fields));
+    bb.on("error", reject);
+    req.pipe(bb);
+  });
+}
+
+// Verify Mailgun HMAC-SHA256 signature
+function verifyMailgunSignature(key: string, timestamp: string, token: string, signature: string): boolean {
+  const expected = createHmac("sha256", key).update(timestamp + token).digest("hex");
+  return expected === signature;
+}
+
 function pctFromScores(report: StoredReport): number {
   // Kies een “overall” voor je badge.
   // Ik pak campaign score als die er is, anders gemiddelde van email+website.
@@ -1054,6 +1073,16 @@ if (req.method === "POST" && url.pathname === "/api/checkout/complete") {
       (report as any).email_auth = (scan as any).email_auth ?? null;
       (report as any).website_scan = (scan as any).website_scan ?? null;
 
+      // Verified SKU: set inbound_status and verify_address
+      let verifyAddress: string | undefined;
+      if (purchase.sku === "verified") {
+        verifyAddress = "verify+" + scanId + "@" + (process.env.INBOUND_DOMAIN ?? "inbound.example.com");
+        (scan as any).inbound_status = "pending";
+        (scan as any).verify_address = verifyAddress;
+        store.save(scanId, scan);
+        (report as any).inbound_status = "pending";
+        (report as any).verify_address = verifyAddress;
+      }
 
       try {
         const reportPath = path.join(store.storeDir, `${scanId}.report.json`);
@@ -1083,7 +1112,7 @@ if (req.method === "POST" && url.pathname === "/api/checkout/complete") {
       }
 
 
-      sendJson(res, 200, { scanId });
+      sendJson(res, 200, { scanId, ...(verifyAddress ? { verifyAddress } : {}) });
     } catch (e) {
       sendJson(res, 500, {
         error: "Failed to complete checkout and start scan",
@@ -1092,6 +1121,110 @@ if (req.method === "POST" && url.pathname === "/api/checkout/complete") {
     }
   });
 
+
+  return;
+}
+
+// INBOUND EMAIL WEBHOOK (Mailgun)
+if (req.method === "POST" && url.pathname === "/api/inbound") {
+  (async () => {
+    try {
+      const fields = await parseMultipart(req);
+
+      // Signature verification
+      const signingKey = process.env.MAILGUN_WEBHOOK_SIGNING_KEY;
+      if (signingKey) {
+        const { timestamp = "", token = "", signature = "" } = fields;
+        if (!verifyMailgunSignature(signingKey, timestamp, token, signature)) {
+          sendJson(res, 403, { error: "Invalid Mailgun signature" });
+          return;
+        }
+      } else {
+        console.warn("[CRS] MAILGUN_WEBHOOK_SIGNING_KEY not set — skipping signature check (dev mode)");
+      }
+
+      // Extract scan ID from recipient
+      const recipient = fields["recipient"] ?? "";
+      const inboundDomain = process.env.INBOUND_DOMAIN ?? "inbound.example.com";
+      const scanId = extractScanIdFromRecipient(recipient, inboundDomain);
+      if (!scanId) {
+        sendJson(res, 400, { error: "Could not extract scan ID from recipient", recipient });
+        return;
+      }
+
+      // Load scan from store
+      const scan = store.load<any>(scanId);
+      if (!scan) {
+        sendJson(res, 404, { error: "Scan not found", scanId });
+        return;
+      }
+
+      // Parse Mailgun message headers
+      const messageHeadersJson = fields["message-headers"] ?? "[]";
+      const headers = parseMailgunHeaders(messageHeadersJson);
+
+      // Get existing DNS data for DMARC fallback
+      const existingDns = scan.email_auth ?? undefined;
+
+      // Build email_scan checks
+      const fromEmail = fields["from"] ?? fields["sender"] ?? "";
+      const checks = buildEmailScanChecks(headers, fromEmail, existingDns);
+
+      // Patch scan
+      scan.email_scan = {
+        checks,
+        inbound_received_at: new Date().toISOString(),
+      };
+      scan.inbound_status = "received";
+      store.save(scanId, scan);
+
+      // Regenerate report
+      const existingReport = reports.get(scanId);
+      const reportInputs = existingReport?.inputs ?? scan.inputs ?? {};
+
+      const report: StoredReport = {
+        ...generateReportV1({
+          ...scan,
+          inputs: {
+            ...reportInputs,
+          },
+        } as any),
+        payment_status: existingReport?.payment_status ?? "paid",
+        purchase_id: existingReport?.purchase_id,
+        stripe_session_id: existingReport?.stripe_session_id,
+        inputs: { ...reportInputs },
+      };
+
+      (report as any).email_auth = scan.email_auth ?? null;
+      (report as any).website_scan = scan.website_scan ?? null;
+      (report as any).email_scan = scan.email_scan;
+      (report as any).inbound_status = scan.inbound_status;
+      (report as any).verify_address = scan.verify_address;
+
+      // Re-render HTML and re-write PDF
+      const html = renderReportHtml(report);
+      const pdfPath = pdfPathFor(scanId);
+      await htmlToPdf(html, pdfPath);
+
+      // Update in-memory reports map
+      reports.set(scanId, report);
+
+      // Also update stored report JSON
+      try {
+        const reportPath = path.join(store.storeDir, `${scanId}.report.json`);
+        fs.writeFileSync(reportPath, JSON.stringify(report, null, 2), "utf-8");
+      } catch (err) {
+        console.warn("[CRS] failed to write report.json after inbound", scanId, String(err));
+      }
+
+      sendJson(res, 200, { ok: true, scanId });
+    } catch (e: any) {
+      sendJson(res, 500, {
+        error: "Inbound processing failed",
+        detail: String(e?.message ?? e),
+      });
+    }
+  })();
 
   return;
 }
