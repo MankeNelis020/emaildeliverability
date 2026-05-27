@@ -13,11 +13,13 @@
   "dependencies": {
     "@crs/core": "workspace:*",
     "@crs/scanners": "workspace:*",
+    "busboy": "^1.6.0",
     "dotenv": "^17.2.3",
     "playwright": "^1.57.0",
     "stripe": "^20.2.0"
   },
   "devDependencies": {
+    "@types/busboy": "^1.5.4",
     "tsx": "^4.20.5"
   }
 }

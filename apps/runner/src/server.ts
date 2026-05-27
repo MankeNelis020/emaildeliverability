@@ -3,13 +3,15 @@
 import "dotenv/config";
 import { createPurchase, getPurchase, updatePurchase } from "./purchaseStore.js";
 
-import { createServer } from "node:http";
-import { randomUUID } from "node:crypto";
+import { createServer, IncomingMessage } from "node:http";
+import { randomUUID, createHmac } from "node:crypto";
 import { URL, fileURLToPath } from "node:url";
 import fs from "node:fs";
 import path from "node:path";
 import { scanWebsiteHttp } from "@crs/scanners";
 import { scanEmailAuth } from "@crs/scanners";
+import { parseMailgunHeaders, buildEmailScanChecks, extractScanIdFromRecipient } from "@crs/scanners";
+import Busboy from "busboy";
 import Stripe from "stripe";
 import { htmlToPdf } from "./pdf.js";
 
