@@ -7,7 +7,6 @@ const ACCESS_CODE = "FREEBETA";
 export default function Checkout() {
   const [hostname, setHostname] = useState("");
   const [code, setCode] = useState("");
-  const [sku, setSku] = useState<"basic" | "verified">("basic");
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
@@ -21,7 +20,7 @@ export default function Checkout() {
     setHostname(stored);
   }, [navigate]);
 
-  // ✅ Oude FREEBETA flow blijft intact
+  // FREEBETA access code flow (for internal/testing)
   const handleCheckout = async () => {
     if (code.trim().toUpperCase() !== ACCESS_CODE) {
       setError("Invalid access code. Try FREEBETA.");
@@ -41,14 +40,13 @@ export default function Checkout() {
     }
   };
 
-  // ✅ Nieuwe Stripe betaalflow
+  // Verified paid scan via Stripe
   const handlePaidCheckout = async () => {
     setError("");
     setIsLoading(true);
     try {
-      const { url, purchaseId } = await createCheckoutSession(sku);
+      const { url, purchaseId } = await createCheckoutSession("verified");
 
-      // bewaren voor success page / later verification
       sessionStorage.setItem("purchaseId", purchaseId);
       sessionStorage.setItem("scanHostname", hostname);
 
@@ -66,29 +64,10 @@ export default function Checkout() {
           <h1 className="text-3xl font-semibold text-white">Checkout</h1>
           <p className="text-sm text-slate-400">Scanning domain: {hostname || "—"}</p>
 
-          {/* --- NEW: Plan selection --- */}
-          <div className="space-y-2">
-            <p className="text-sm font-semibold text-white">Choose scan</p>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                className={sku === "basic" ? "btnPrimary" : "btnSecondary"}
-                onClick={() => setSku("basic")}
-                disabled={isLoading}
-              >
-                Basic €10
-              </button>
-              <button
-                type="button"
-                className={sku === "verified" ? "btnPrimary" : "btnSecondary"}
-                onClick={() => setSku("verified")}
-                disabled={isLoading}
-              >
-                Verified €29
-              </button>
-            </div>
+          <div className="card space-y-2">
+            <p className="text-sm font-semibold text-white">Verified scan — €29</p>
             <p className="text-xs text-slate-400">
-              You’ll be redirected to Stripe to pay securely.
+              We analyse DNS, SPF, DKIM, DMARC and your website. You'll be redirected to Stripe to pay securely.
             </p>
           </div>
 
@@ -98,10 +77,10 @@ export default function Checkout() {
             onClick={handlePaidCheckout}
             disabled={isLoading}
           >
-            {isLoading ? "Redirecting to Stripe..." : "Pay & start scan"}
+            {isLoading ? "Redirecting to Stripe..." : "Pay & start Verified scan"}
           </button>
 
-          {/* --- OLD: Access code block stays (with small text change) --- */}
+          {/* Access code block for internal/testing */}
           <div className="border-t border-white/10 pt-6 space-y-3">
             <label className="text-sm font-semibold text-white" htmlFor="access-code">
               Or use an access code
