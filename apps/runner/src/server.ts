@@ -6,6 +6,7 @@ import { createPurchase, getPurchase, updatePurchase } from "./purchaseStore.js"
 import { createServer, IncomingMessage } from "node:http";
 import { randomUUID, createHmac } from "node:crypto";
 import { URL, fileURLToPath } from "node:url";
+import { resolveMx } from "node:dns/promises";
 import fs from "node:fs";
 import path from "node:path";
 import { scanWebsiteHttp } from "@crs/scanners";
@@ -28,7 +29,7 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
 console.log("Stripe key loaded:", !!process.env.STRIPE_SECRET_KEY);
 
 
-type PaymentStatus = "unpaid" | "paid" | "freebeta";
+type PaymentStatus = "unpaid" | "paid" | "freebeta" | "free";
 
 
 type Blocker = { id: string; message: string; severity?: "hard" | "soft" };
@@ -83,6 +84,11 @@ const store = createScanStore(STORE_DIR);
 
 // in-memory caches
 const reports = new Map<string, StoredReport>();
+
+// Rate limit for free scans: max 3 per apex domain per day
+const rateLimit = new Map<string, { count: number; day: string }>();
+// Rate limit for free scans: max 5 per IP per day
+const rateLimitByIp = new Map<string, { count: number; day: string }>();
 
 
 function esc(s: any) {
@@ -581,6 +587,180 @@ const server = createServer((req, res) => {
   }
 
 
+// FREE SCAN — no payment, Basic plan only
+if (req.method === "POST" && url.pathname === "/api/scan/free") {
+  let body = "";
+  req.on("data", (chunk) => (body += chunk));
+
+  req.on("end", async () => {
+    try {
+      const payload = JSON.parse(body || "{}") as {
+        hostname?: string;
+        sending_email?: string;
+        contact_email?: string;
+      };
+
+      // Validate required fields
+      const emailRegex = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+      if (!payload.hostname) {
+        sendJson(res, 400, { error: "hostname required" });
+        return;
+      }
+      if (!payload.sending_email || !emailRegex.test(payload.sending_email)) {
+        sendJson(res, 400, { error: "sending_email must be a valid email" });
+        return;
+      }
+      if (!payload.contact_email || !emailRegex.test(payload.contact_email)) {
+        sendJson(res, 400, { error: "contact_email must be a valid email" });
+        return;
+      }
+
+      // MX check on contact_email domain (accept if DNS is slow >3s)
+      const contactDomain = payload.contact_email.split("@")[1] ?? "";
+      const mxResult = await Promise.race([
+        resolveMx(contactDomain).catch(() => null as null),
+        new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 3000)),
+      ]);
+      if (mxResult !== "timeout" && (!Array.isArray(mxResult) || mxResult.length === 0)) {
+        sendJson(res, 400, {
+          error: "Contact email domain has no mail server (MX record). Use a real business email.",
+        });
+        return;
+      }
+
+      // Rate limit: max 3 free scans per apex domain per day
+      const sendingDomainRaw = payload.sending_email.split("@")[1] ?? payload.hostname;
+      const apexDomain = sendingDomainRaw.split(".").slice(-2).join(".");
+      const today = new Date().toISOString().slice(0, 10);
+      const rl = rateLimit.get(apexDomain);
+      if (rl && rl.day === today && rl.count >= 3) {
+        sendJson(res, 429, { error: "Max 3 free scans per domain per day." });
+        return;
+      }
+      if (rl && rl.day === today) {
+        rl.count++;
+      } else {
+        rateLimit.set(apexDomain, { count: 1, day: today });
+      }
+
+      // Rate limit by IP: max 5 free scans per IP per day
+      const clientIp = req.socket.remoteAddress ?? "unknown";
+      const ipRl = rateLimitByIp.get(clientIp);
+      if (ipRl && ipRl.day === today && ipRl.count >= 5) {
+        sendJson(res, 429, { error: "Max 5 free scans per IP per day." });
+        return;
+      }
+      if (ipRl && ipRl.day === today) {
+        ipRl.count++;
+      } else {
+        rateLimitByIp.set(clientIp, { count: 1, day: today });
+      }
+
+      const scanId = randomUUID();
+
+      // Create scan
+      const scan = makeInitialScan(
+        scanId,
+        payload.hostname,
+        payload.sending_email,
+        payload.contact_email
+      );
+      (scan as any).inputs.plan = "basic";
+      store.save(scanId, scan);
+
+      // Email auth
+      try {
+        const emailAuth = await scanEmailAuth(payload.hostname);
+        (scan as any).email_auth = emailAuth;
+      } catch (e) {
+        console.warn("[CRS] email auth scan failed:", String((e as any)?.message ?? e));
+        (scan as any).email_auth = null;
+      }
+      store.save(scanId, scan);
+
+      // Website scan
+      try {
+        const websiteEvidence = await scanWebsiteHttp(scan.inputs.website_url, {
+          noCacheSamples: 3,
+          cacheSamples: 3,
+        });
+        (scan as any).website_scan = websiteEvidence;
+      } catch (e) {
+        console.log("[CRS] website scan failed:", String((e as any)?.message ?? e));
+      }
+
+      scan.meta = {
+        ...scan.meta,
+        runtime_ms: Date.now() - new Date(scan.created_at).getTime(),
+      };
+      store.save(scanId, scan);
+
+      // Generate report
+      const report: StoredReport = {
+        ...generateReportV1({
+          ...scan,
+          inputs: {
+            ...(scan as any).inputs,
+            hostname: payload.hostname,
+            website_url: (scan as any).inputs?.website_url,
+            sending_email: payload.sending_email,
+            contact_email: payload.contact_email,
+            plan: "basic",
+          },
+        } as any),
+        payment_status: "free",
+        inputs: {
+          ...(scan as any).inputs,
+          hostname: payload.hostname,
+          website_url: (scan as any).inputs?.website_url,
+          sending_email: payload.sending_email,
+          contact_email: payload.contact_email,
+          plan: "basic",
+        },
+      };
+
+      (report as any).email_auth = (scan as any).email_auth ?? null;
+      (report as any).website_scan = (scan as any).website_scan ?? null;
+
+      // Store lead
+      try {
+        const contactApex = contactDomain.split(".").slice(-2).join(".");
+        const leadEntry = JSON.stringify({
+          email: payload.contact_email,
+          domain: contactApex,
+          scanId,
+          hostname: payload.hostname,
+          created_at: new Date().toISOString(),
+        });
+        fs.mkdirSync(STORE_DIR, { recursive: true });
+        fs.appendFileSync(path.join(STORE_DIR, "leads.jsonl"), leadEntry + "\n", "utf-8");
+      } catch (e) {
+        console.warn("[CRS] failed to write lead:", String(e));
+      }
+
+      // Save report to disk
+      try {
+        const reportPath = path.join(store.storeDir, `${scanId}.report.json`);
+        fs.writeFileSync(reportPath, JSON.stringify(report, null, 2), "utf-8");
+      } catch (err) {
+        console.warn("[CRS] failed to write report.json", scanId, String(err));
+      }
+
+      // Cache report in memory (no PDF for free scans)
+      reports.set(scanId, report);
+
+      sendJson(res, 200, { scanId });
+    } catch (e: any) {
+      sendJson(res, 400, {
+        error: "Scan failed",
+        detail: String(e?.message ?? e),
+      });
+    }
+  });
+
+  return;
+}
+
 // CREATE SCAN + PDF
 if (req.method === "POST" && url.pathname === "/api/scan") {
   let body = "";
@@ -854,8 +1034,11 @@ if (req.method === "POST" && url.pathname === "/api/checkout/create-session") {
         cancel_url: `${process.env.APP_URL}/checkout/cancel?purchaseId=${purchaseId}`,
         metadata: { purchaseId, sku, scanId: scanId ?? "" },
       });
-  
-  
+
+      // Persist stripe_session_id immediately so /api/checkout/complete can retrieve it
+      updatePurchase(purchaseId, { stripe_session_id: session.id });
+
+
       sendJson(res, 200, { url: session.url, purchaseId });
     } catch (e) {
       sendJson(res, 500, {
@@ -891,6 +1074,7 @@ if (
   }
 
 
+  // "free" and "unpaid" statuses both fail this check intentionally — PDF is for paid/freebeta only
   if (report.payment_status !== "paid" && report.payment_status !== "freebeta") {
     sendJson(res, 402, { error: "Payment required", scanId });
     return;
@@ -975,13 +1159,22 @@ if (req.method === "POST" && url.pathname === "/api/checkout/complete") {
         return;
       }
 
+      // Idempotency: if already used, return the existing scanId
+      if (purchase.status === "used") {
+        if (purchase.scanId) {
+          sendJson(res, 200, { scanId: purchase.scanId });
+        } else {
+          sendJson(res, 409, { error: "This purchase has already been used." });
+        }
+        return;
+      }
 
       if (!purchase.stripe_session_id) {
         sendJson(res, 400, { error: "Stripe session missing for purchase" });
         return;
       }
 
-
+      // Verify payment status against Stripe API — never trust client-supplied status
       const session = await stripe.checkout.sessions.retrieve(purchase.stripe_session_id);
 
 
@@ -1111,6 +1304,8 @@ if (req.method === "POST" && url.pathname === "/api/checkout/complete") {
         throw new Error(`PDF generation reported success but file missing: ${pdfPath}`);
       }
 
+      // Mark purchase as used so duplicate success-page loads return the same scanId
+      updatePurchase(payload.purchaseId, { status: "used", scanId });
 
       sendJson(res, 200, { scanId, ...(verifyAddress ? { verifyAddress } : {}) });
     } catch (e) {

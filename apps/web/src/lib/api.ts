@@ -6,17 +6,40 @@ export type ScanReport = {
   verdict: string;
   confidence: string;
   ready_to_send: boolean;
-  blockers: Array<{ id: string; message: string }>;
+  blockers: Array<{ id: string; message: string; severity?: string }>;
   warnings?: Array<{ id: string; message: string }>;
+  payment_status?: "free" | "unpaid" | "paid" | "freebeta";
+  inputs?: {
+    plan?: string;
+    website_url?: string;
+    sending_email?: string;
+    contact_email?: string;
+  };
+  scores?: {
+    email?: { score: number; status: string };
+    website?: { score: number; status: string };
+    campaign?: { score: number; level: string };
+  };
+  top_actions?: Array<{
+    id: string;
+    title: string;
+    why: string;
+    impact: string;
+    effort: string;
+    steps: string[];
+  }>;
+  why?: string[];
 };
 
 const API_BASE =
   import.meta.env.VITE_API_BASE_URL || "http://localhost:8787";
 const timeoutMs = 15000;
+// Longer timeout for free scan which runs scans synchronously before returning
+const scanTimeoutMs = 60000;
 
-async function fetchWithTimeout(input: RequestInfo, init?: RequestInit) {
+async function fetchWithTimeout(input: RequestInfo, init?: RequestInit, customTimeoutMs?: number) {
   const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), timeoutMs);
+  const id = setTimeout(() => controller.abort(), customTimeoutMs ?? timeoutMs);
   try {
     const response = await fetch(input, { ...init, signal: controller.signal });
     return response;
@@ -47,6 +70,43 @@ export async function startScan(hostname: string): Promise<{ scanId: string }> {
       );
     }
 
+
+    return data as { scanId: string };
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("Request timed out. Please try again.");
+    }
+    throw error instanceof Error
+      ? error
+      : new Error("Unable to start scan. Please try again.");
+  }
+}
+
+export async function startFreeScan(params: {
+  hostname: string;
+  sending_email: string;
+  contact_email: string;
+}): Promise<{ scanId: string }> {
+  try {
+    const response = await fetchWithTimeout(
+      `${API_BASE}/api/scan/free`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(params),
+      },
+      scanTimeoutMs
+    );
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(
+        (data as any)?.error ||
+        (data as any)?.detail ||
+        `Scan start failed (${response.status})`
+      );
+    }
 
     return data as { scanId: string };
   } catch (error) {
@@ -96,11 +156,15 @@ export async function completeCheckoutAndStartScan(params: {
   sending_email?: string;
   contact_email?: string;
 }): Promise<{ scanId: string }> {
-  const response = await fetchWithTimeout(`${API_BASE}/api/checkout/complete`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
-  });
+  const response = await fetchWithTimeout(
+    `${API_BASE}/api/checkout/complete`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(params),
+    },
+    scanTimeoutMs
+  );
 
 
   const data = await response.json().catch(() => ({}));

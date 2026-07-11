@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { startScan } from "../lib/api";
+import { completeCheckoutAndStartScan } from "../lib/api";
 
 export default function CheckoutSuccess() {
   const [params] = useSearchParams();
@@ -8,19 +8,26 @@ export default function CheckoutSuccess() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const hostname = sessionStorage.getItem("scanHostname");
-    if (!hostname) {
-      setError("No hostname found. Please start again.");
+    const hostname = sessionStorage.getItem("scanHostname") || "";
+    const purchaseId = params.get("purchaseId") || sessionStorage.getItem("purchaseId") || "";
+    const sending_email = sessionStorage.getItem("scan_sending_email") || "";
+    const contact_email = sessionStorage.getItem("scan_contact_email") || "";
+
+    if (!hostname || !purchaseId) {
+      setError("Missing scan data. Please start again.");
       return;
     }
 
-    // purchaseId is optional for now (useful later when we add webhook verification)
-    const purchaseId = params.get("purchaseId") || sessionStorage.getItem("purchaseId") || "";
     if (purchaseId) sessionStorage.setItem("purchaseId", purchaseId);
 
     (async () => {
       try {
-        const { scanId } = await startScan(hostname);
+        const { scanId } = await completeCheckoutAndStartScan({
+          purchaseId,
+          hostname,
+          sending_email,
+          contact_email,
+        });
         sessionStorage.setItem("scanId", scanId);
         navigate(`/result/${scanId}`, { replace: true });
       } catch (e) {

@@ -58,6 +58,41 @@ export default function Result() {
                 </p>
               </div>
 
+              {report.scores ? (
+                <div className="card">
+                  <h3 className="text-lg font-semibold text-white">Scores</h3>
+                  <div className="mt-4 grid grid-cols-3 gap-4">
+                    {report.scores.email ? (
+                      <div className="space-y-1">
+                        <p className="text-xs text-slate-400 uppercase tracking-wide">Email</p>
+                        <p className={`text-2xl font-bold ${report.scores.email.score >= 70 ? "text-green-400" : report.scores.email.score >= 40 ? "text-yellow-400" : "text-red-400"}`}>
+                          {report.scores.email.score}/100
+                        </p>
+                        <p className="text-xs text-slate-400">{report.scores.email.status}</p>
+                      </div>
+                    ) : null}
+                    {report.scores.website ? (
+                      <div className="space-y-1">
+                        <p className="text-xs text-slate-400 uppercase tracking-wide">Website</p>
+                        <p className={`text-2xl font-bold ${report.scores.website.score >= 70 ? "text-green-400" : report.scores.website.score >= 40 ? "text-yellow-400" : "text-red-400"}`}>
+                          {report.scores.website.score}/100
+                        </p>
+                        <p className="text-xs text-slate-400">{report.scores.website.status}</p>
+                      </div>
+                    ) : null}
+                    {report.scores.campaign ? (
+                      <div className="space-y-1">
+                        <p className="text-xs text-slate-400 uppercase tracking-wide">Campaign</p>
+                        <p className={`text-2xl font-bold ${report.scores.campaign.score >= 70 ? "text-green-400" : report.scores.campaign.score >= 40 ? "text-yellow-400" : "text-red-400"}`}>
+                          {report.scores.campaign.score}/100
+                        </p>
+                        <p className="text-xs text-slate-400">{report.scores.campaign.level}</p>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+
               <div className="card">
                 <h3 className="text-lg font-semibold text-white">Blockers</h3>
                 <ul className="mt-4 space-y-2 text-sm text-slate-300">
@@ -81,30 +116,44 @@ export default function Result() {
                   </ul>
                 </div>
               ) : null}
+
+              {report.payment_status === "paid" ? (
+                <div className="flex flex-wrap gap-3">
+                  {scanId ? (
+                    <a
+                      href={`https://api.sendshield.nl/api/scan/${scanId}/report.pdf`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="btnPrimary"
+                    >
+                      Download PDF
+                    </a>
+                  ) : null}
+                  <Link to="/scan" className="btnPrimary">
+                    Run again
+                  </Link>
+                  <a href="/#pricing" className="btnSecondary">
+                    Back to pricing
+                  </a>
+                </div>
+              ) : (
+                <div className="card">
+                  <h3 className="text-lg font-semibold text-white">Wil je meer weten?</h3>
+                  <p className="mt-2 text-sm text-slate-300">
+                    Dit is een gratis Basic scan. Met de Verified scan analyseren we een echte test-mail
+                    uit jouw systeem: DKIM-handtekening, SPF-alignment, Return-Path en hoe Microsoft
+                    de mail beoordeelt.
+                  </p>
+                  <div className="mt-4 flex flex-wrap gap-3">
+                    <Link to="/scan" className="btnPrimary">
+                      Verified scan starten
+                    </Link>
+                    <a href="#contact" className="btnSecondary">Plan een gesprek</a>
+                  </div>
+                </div>
+              )}
             </div>
           ) : null}
-<div className="flex flex-wrap gap-3">
-
-{scanId && (
-  <a
-    href={`https://api.sendshield.nl/api/scan/${scanId}/report.pdf`}
-    target="_blank"
-    rel="noopener noreferrer"
-    className="btnPrimary"
-  >
-    Download PDF
-  </a>
-)}
-
-<Link to="/scan" className="btnPrimary">
-  Run again
-</Link>
-
-<a href="/#pricing" className="btnSecondary">
-  Back to pricing
-</a>
-
-</div>
         </div>
       </div>
     </main>

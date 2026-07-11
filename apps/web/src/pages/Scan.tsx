@@ -1,15 +1,14 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { normalizeHostname } from "../lib/normalize";
+import { startFreeScan } from "../lib/api";
 
 type Plan = "basic" | "verified";
 
-type Errors = {
+type FieldErrors = {
   websiteUrl?: string;
   sendingEmail?: string;
   customerEmail?: string;
-  recipientCount?: string;
-  inboundTestUrl?: string;
 };
 
 const emailRegex = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
@@ -35,85 +34,62 @@ export default function Scan() {
   const [websiteUrl, setWebsiteUrl] = useState("");
   const [sendingEmail, setSendingEmail] = useState("");
   const [customerEmail, setCustomerEmail] = useState("");
-  const [recipientCount, setRecipientCount] = useState("");
-  const [inboundTestUrl, setInboundTestUrl] = useState("");
-  const [errors, setErrors] = useState<Errors>({});
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const navigate = useNavigate();
-
-  const isVerified = plan === "verified";
 
   const isFormValid = useMemo(() => {
     if (!normalizeUrl(websiteUrl)) return false;
     if (!emailRegex.test(sendingEmail.trim())) return false;
     if (!emailRegex.test(customerEmail.trim())) return false;
-    if (isVerified) {
-      const count = Number(recipientCount);
-      if (!Number.isInteger(count) || count < 1) return false;
-      if (!normalizeUrl(inboundTestUrl)) return false;
-    }
     return true;
-  }, [websiteUrl, sendingEmail, customerEmail, recipientCount, inboundTestUrl, isVerified]);
-
-  const handlePlanChange = (nextPlan: Plan) => {
-    setPlan(nextPlan);
-    if (nextPlan === "basic") {
-      setRecipientCount("");
-      setInboundTestUrl("");
-      setErrors((prev) => ({
-        ...prev,
-        recipientCount: undefined,
-        inboundTestUrl: undefined,
-      }));
-    }
-  };
+  }, [websiteUrl, sendingEmail, customerEmail]);
 
   const validate = (): boolean => {
-    const nextErrors: Errors = {};
-    const normalizedUrl = normalizeUrl(websiteUrl);
-    if (!normalizedUrl) {
+    const nextErrors: FieldErrors = {};
+    if (!normalizeUrl(websiteUrl)) {
       nextErrors.websiteUrl = "Enter a valid website URL.";
     }
     if (!emailRegex.test(sendingEmail.trim())) {
       nextErrors.sendingEmail = "Enter a valid sending email.";
     }
     if (!emailRegex.test(customerEmail.trim())) {
-      nextErrors.customerEmail = "Enter a valid customer email.";
+      nextErrors.customerEmail = "Enter a valid contact email.";
     }
-    if (isVerified) {
-      const count = Number(recipientCount);
-      if (!Number.isInteger(count) || count < 1) {
-        nextErrors.recipientCount = "Recipient count must be at least 1.";
-      }
-      if (!normalizeUrl(inboundTestUrl)) {
-        nextErrors.inboundTestUrl = "Enter a valid inbound test URL.";
-      }
-    }
-    setErrors(nextErrors);
+    setFieldErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
   };
 
-  const handleContinue = () => {
-    if (!validate()) {
-      return;
-    }
+  const handleBasicSubmit = async () => {
+    if (!validate()) return;
     setIsSubmitting(true);
-    const normalizedUrl = normalizeUrl(websiteUrl);
+    setError("");
+    try {
+      const hostname = normalizeHostname(websiteUrl);
+      const { scanId } = await startFreeScan({
+        hostname,
+        sending_email: sendingEmail.trim(),
+        contact_email: customerEmail.trim(),
+      });
+      navigate(`/result/${scanId}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Something went wrong.");
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleVerifiedContinue = () => {
+    if (!validate()) return;
     const hostname = normalizeHostname(websiteUrl);
-    const payload = {
-      plan,
-      websiteUrl: normalizedUrl,
-      hostname,
-      sendingEmail: sendingEmail.trim(),
-      customerEmail: customerEmail.trim(),
-      recipientCount: isVerified ? Number(recipientCount) : null,
-      inboundTestUrl: isVerified ? normalizeUrl(inboundTestUrl) : null,
-      createdAt: new Date().toISOString(),
-    };
-    sessionStorage.setItem("crs_scan_intent_v1", JSON.stringify(payload));
     sessionStorage.setItem("scanHostname", hostname);
+    sessionStorage.setItem("scan_sending_email", sendingEmail.trim());
+    sessionStorage.setItem("scan_contact_email", customerEmail.trim());
+    sessionStorage.setItem("scan_plan", "verified");
     navigate("/checkout");
   };
+
+  const handleContinue = plan === "basic" ? handleBasicSubmit : handleVerifiedContinue;
 
   return (
     <main className="section">
@@ -127,7 +103,7 @@ export default function Scan() {
               role="tab"
               aria-selected={plan === "basic"}
               className={`scanToggleButton ${plan === "basic" ? "scanToggleActive" : ""}`}
-              onClick={() => handlePlanChange("basic")}
+              onClick={() => setPlan("basic")}
             >
               Basic scan
             </button>
@@ -136,7 +112,7 @@ export default function Scan() {
               role="tab"
               aria-selected={plan === "verified"}
               className={`scanToggleButton ${plan === "verified" ? "scanToggleActive" : ""}`}
-              onClick={() => handlePlanChange("verified")}
+              onClick={() => setPlan("verified")}
             >
               Verified scan
             </button>
@@ -155,7 +131,7 @@ export default function Scan() {
                 value={websiteUrl}
                 onChange={(event) => setWebsiteUrl(event.target.value)}
               />
-              {errors.websiteUrl ? <p className="helperText text-red-300">{errors.websiteUrl}</p> : null}
+              {fieldErrors.websiteUrl ? <p className="helperText text-red-300">{fieldErrors.websiteUrl}</p> : null}
             </div>
 
             <div className="space-y-2">
@@ -170,59 +146,26 @@ export default function Scan() {
                 value={sendingEmail}
                 onChange={(event) => setSendingEmail(event.target.value)}
               />
-              {errors.sendingEmail ? <p className="helperText text-red-300">{errors.sendingEmail}</p> : null}
+              {fieldErrors.sendingEmail ? <p className="helperText text-red-300">{fieldErrors.sendingEmail}</p> : null}
             </div>
 
             <div className="space-y-2">
               <label className="text-sm font-semibold text-white" htmlFor="customer-email">
-                Customer email address
+                Contact email address
               </label>
               <input
                 id="customer-email"
                 className="inputField"
                 type="email"
-                placeholder="you@customer.com"
+                placeholder="you@yourdomain.com"
                 value={customerEmail}
                 onChange={(event) => setCustomerEmail(event.target.value)}
               />
-              {errors.customerEmail ? <p className="helperText text-red-300">{errors.customerEmail}</p> : null}
+              {fieldErrors.customerEmail ? <p className="helperText text-red-300">{fieldErrors.customerEmail}</p> : null}
             </div>
-
-            {isVerified ? (
-              <>
-                <div className="space-y-2">
-                  <label className="text-sm font-semibold text-white" htmlFor="recipient-count">
-                    Approx. recipients
-                  </label>
-                  <input
-                    id="recipient-count"
-                    className="inputField"
-                    type="number"
-                    min={1}
-                    placeholder="10000"
-                    value={recipientCount}
-                    onChange={(event) => setRecipientCount(event.target.value)}
-                  />
-                  {errors.recipientCount ? <p className="helperText text-red-300">{errors.recipientCount}</p> : null}
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-semibold text-white" htmlFor="inbound-url">
-                    Unique inbound test URL
-                  </label>
-                  <input
-                    id="inbound-url"
-                    className="inputField"
-                    type="url"
-                    placeholder="https://verify.example.com"
-                    value={inboundTestUrl}
-                    onChange={(event) => setInboundTestUrl(event.target.value)}
-                  />
-                  <p className="helperText">Send a test email to this unique address after checkout.</p>
-                  {errors.inboundTestUrl ? <p className="helperText text-red-300">{errors.inboundTestUrl}</p> : null}
-                </div>
-              </>
-            ) : null}
           </div>
+
+          {error ? <p className="text-sm text-red-300">{error}</p> : null}
 
           <button
             type="button"
@@ -230,7 +173,11 @@ export default function Scan() {
             onClick={handleContinue}
             disabled={!isFormValid || isSubmitting}
           >
-            {isSubmitting ? "Saving..." : "Continue"}
+            {isSubmitting
+              ? "Starting scan..."
+              : plan === "basic"
+              ? "Start gratis scan"
+              : "Continue to checkout"}
           </button>
         </div>
       </div>
