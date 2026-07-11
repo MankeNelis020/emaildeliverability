@@ -8,6 +8,7 @@ import Result from "./pages/Result";
 import Scan from "./pages/Scan";
 import CheckoutSuccess from "./pages/CheckoutSuccess";
 import CheckoutCancel from "./pages/CheckoutCancel";
+import VerifiedWaiting from "./pages/VerifiedWaiting";
 
 export default function App() {
   return (
@@ -20,6 +21,7 @@ export default function App() {
         <Route path="/checkout/success" element={<CheckoutSuccess />} />
         <Route path="/checkout/cancel" element={<CheckoutCancel />} />
         <Route path="/result/:scanId" element={<Result />} />
+        <Route path="/verified-waiting/:scanId" element={<VerifiedWaiting />} />
         <Route path="/contact" element={<Contact />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

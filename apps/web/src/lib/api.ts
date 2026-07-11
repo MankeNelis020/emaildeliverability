@@ -29,6 +29,14 @@ export type ScanReport = {
     steps: string[];
   }>;
   why?: string[];
+  inbound_status?: "pending" | "received";
+  verify_address?: string;
+  inbound_received_at?: string;
+  email_scan?: {
+    checks?: Record<string, unknown>;
+    inbound_received_at?: string;
+    parse_error?: boolean;
+  };
 };
 
 const API_BASE =
@@ -155,7 +163,7 @@ export async function completeCheckoutAndStartScan(params: {
   hostname: string;
   sending_email?: string;
   contact_email?: string;
-}): Promise<{ scanId: string }> {
+}): Promise<{ scanId: string; verifyAddress?: string }> {
   const response = await fetchWithTimeout(
     `${API_BASE}/api/checkout/complete`,
     {
@@ -179,5 +187,37 @@ export async function completeCheckoutAndStartScan(params: {
   }
 
 
-  return data as { scanId: string };
+  return data as { scanId: string; verifyAddress?: string };
+}
+
+export async function pollScanInboundStatus(
+  scanId: string,
+  onReceived: (report: ScanReport) => void,
+  onTimeout: () => void,
+  intervalMs = 5000,
+  timeoutMs = 30 * 60 * 1000  // 30 minutes
+): Promise<() => void> {
+  const start = Date.now();
+  let timer: ReturnType<typeof setInterval>;
+
+  const cancel = () => clearInterval(timer);
+
+  timer = setInterval(async () => {
+    if (Date.now() - start > timeoutMs) {
+      cancel();
+      onTimeout();
+      return;
+    }
+    try {
+      const report = await getScan(scanId);
+      if (report.inbound_status === "received") {
+        cancel();
+        onReceived(report);
+      }
+    } catch {
+      // Ignore transient errors, keep polling
+    }
+  }, intervalMs);
+
+  return cancel;
 }

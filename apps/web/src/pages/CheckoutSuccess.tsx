@@ -22,14 +22,19 @@ export default function CheckoutSuccess() {
 
     (async () => {
       try {
-        const { scanId } = await completeCheckoutAndStartScan({
+        const { scanId, verifyAddress } = await completeCheckoutAndStartScan({
           purchaseId,
           hostname,
           sending_email,
           contact_email,
         });
         sessionStorage.setItem("scanId", scanId);
-        navigate(`/result/${scanId}`, { replace: true });
+        if (verifyAddress) {
+          sessionStorage.setItem("verifyAddress", verifyAddress);
+          navigate(`/verified-waiting/${scanId}`, { replace: true });
+        } else {
+          navigate(`/result/${scanId}`, { replace: true });
+        }
       } catch (e) {
         setError(e instanceof Error ? e.message : "Something went wrong.");
       }

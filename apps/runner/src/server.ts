@@ -1323,15 +1323,17 @@ if (req.method === "POST" && url.pathname === "/api/checkout/complete") {
 // INBOUND EMAIL WEBHOOK (Mailgun)
 if (req.method === "POST" && url.pathname === "/api/inbound") {
   (async () => {
+    let scanId: string | null = null;
     try {
       const fields = await parseMultipart(req);
 
-      // Signature verification
+      // Signature verification — always return 200 to Mailgun to prevent retries
       const signingKey = process.env.MAILGUN_WEBHOOK_SIGNING_KEY;
       if (signingKey) {
         const { timestamp = "", token = "", signature = "" } = fields;
         if (!verifyMailgunSignature(signingKey, timestamp, token, signature)) {
-          sendJson(res, 403, { error: "Invalid Mailgun signature" });
+          console.warn("[CRS] Invalid Mailgun signature — accepting silently");
+          sendJson(res, 200, { ok: true, skipped: "invalid_signature" });
           return;
         }
       } else {
@@ -1340,37 +1342,57 @@ if (req.method === "POST" && url.pathname === "/api/inbound") {
 
       // Extract scan ID from recipient
       const recipient = fields["recipient"] ?? "";
-      const inboundDomain = process.env.INBOUND_DOMAIN ?? "inbound.example.com";
-      const scanId = extractScanIdFromRecipient(recipient, inboundDomain);
+      const inboundDomain = process.env.INBOUND_DOMAIN ?? "inbound.sendshield.nl";
+      scanId = extractScanIdFromRecipient(recipient, inboundDomain);
       if (!scanId) {
-        sendJson(res, 400, { error: "Could not extract scan ID from recipient", recipient });
+        console.warn("[CRS] Could not extract scan ID from recipient:", recipient);
+        sendJson(res, 200, { ok: true, skipped: "unknown_recipient" });
         return;
       }
 
       // Load scan from store
       const scan = store.load<any>(scanId);
       if (!scan) {
-        sendJson(res, 404, { error: "Scan not found", scanId });
+        console.warn("[CRS] Scan not found for inbound:", scanId);
+        sendJson(res, 200, { ok: true, skipped: "unknown_scan" });
         return;
       }
 
-      // Parse Mailgun message headers
-      const messageHeadersJson = fields["message-headers"] ?? "[]";
-      const headers = parseMailgunHeaders(messageHeadersJson);
+      // Idempotency: if already received, return 200 without reprocessing
+      if (scan.inbound_status === "received") {
+        sendJson(res, 200, { ok: true, skipped: "already_received" });
+        return;
+      }
 
-      // Get existing DNS data for DMARC fallback
-      const existingDns = scan.email_auth ?? undefined;
+      // Set timestamps immediately so even parse errors still mark the scan received
+      scan.inbound_received_at = new Date().toISOString();
+      scan.inbound_status = "received";
 
-      // Build email_scan checks
-      const fromEmail = fields["from"] ?? fields["sender"] ?? "";
-      const checks = buildEmailScanChecks(headers, fromEmail, existingDns);
+      let checks: any;
+      let parseError = false;
+
+      try {
+        // Parse Mailgun message headers
+        const messageHeadersJson = fields["message-headers"] ?? "[]";
+        const headers = parseMailgunHeaders(messageHeadersJson);
+
+        // Pass existing DNS DMARC data for alignment mode and policy fallback
+        const existingDns = { dmarc: (scan as any).email_auth?.dmarc };
+
+        // Build email_scan checks (async — does DNS lookup for DKIM key bits)
+        const fromEmail = fields["from"] ?? fields["sender"] ?? "";
+        checks = await buildEmailScanChecks(headers, fromEmail, existingDns);
+      } catch (e: any) {
+        console.warn("[CRS] Failed to build email scan checks:", String(e?.message ?? e));
+        parseError = true;
+      }
 
       // Patch scan
       scan.email_scan = {
-        checks,
-        inbound_received_at: new Date().toISOString(),
+        ...(checks ? { checks } : {}),
+        inbound_received_at: scan.inbound_received_at,
+        ...(parseError ? { parse_error: true } : {}),
       };
-      scan.inbound_status = "received";
       store.save(scanId, scan);
 
       // Regenerate report
@@ -1394,6 +1416,7 @@ if (req.method === "POST" && url.pathname === "/api/inbound") {
       (report as any).website_scan = scan.website_scan ?? null;
       (report as any).email_scan = scan.email_scan;
       (report as any).inbound_status = scan.inbound_status;
+      (report as any).inbound_received_at = scan.inbound_received_at;
       (report as any).verify_address = scan.verify_address;
 
       // Re-render HTML and re-write PDF
@@ -1414,10 +1437,9 @@ if (req.method === "POST" && url.pathname === "/api/inbound") {
 
       sendJson(res, 200, { ok: true, scanId });
     } catch (e: any) {
-      sendJson(res, 500, {
-        error: "Inbound processing failed",
-        detail: String(e?.message ?? e),
-      });
+      console.error("[CRS] Inbound processing error:", String(e?.message ?? e));
+      // Always return 200 to prevent Mailgun retries
+      sendJson(res, 200, { ok: true, skipped: "processing_error" });
     }
   })();
 
